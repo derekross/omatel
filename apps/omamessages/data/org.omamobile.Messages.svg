@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Messages: a speech bubble on a rounded square. Original artwork, GPL-3.0-or-later. -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="#3f8ae0"/>
+  <path d="M64 30c-21 0-38 13.4-38 30 0 9.4 5.4 17.8 13.9 23.3L36 98l17.2-8.6c3.4.8 7 1.2 10.8 1.2 21 0 38-13.4 38-30.3S85 30 64 30z" fill="#ffffff"/>
+  <circle cx="48" cy="60" r="5" fill="#3f8ae0"/>
+  <circle cx="64" cy="60" r="5" fill="#3f8ae0"/>
+  <circle cx="80" cy="60" r="5" fill="#3f8ae0"/>
+</svg>

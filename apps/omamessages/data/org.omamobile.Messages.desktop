@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Messages
+GenericName=Text messages
+Comment=Send and receive text messages
+Exec=omamessages %u
+Icon=org.omamobile.Messages
+Terminal=false
+Categories=Network;Chat;InstantMessaging;
+Keywords=sms;text;message;chat;mms;
+MimeType=x-scheme-handler/sms;x-scheme-handler/smsto;x-scheme-handler/mms;x-scheme-handler/mmsto;
+StartupWMClass=org.omamobile.Messages
+X-Purism-FormFactor=Workstation;Mobile;
