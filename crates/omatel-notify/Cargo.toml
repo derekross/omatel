@@ -1,5 +1,19 @@
 [package]
 name = "omatel-notify"
+description = "An org.freedesktop.Notifications client with actions and inline reply"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+zbus.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+omatel-mock.workspace = true
+tokio.workspace = true

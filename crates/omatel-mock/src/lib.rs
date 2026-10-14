@@ -7,4 +7,7 @@
 //! - [`notifications`]: an org.freedesktop.Notifications server that
 //!   records what it is sent and can answer with actions and replies.
 
+pub mod bus;
 pub mod demo;
+pub mod mm;
+pub mod notifications;

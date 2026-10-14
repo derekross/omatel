@@ -1,5 +1,21 @@
 [package]
 name = "omatel-mm"
+description = "zbus proxies and typed wrappers for ModemManager 1.24 (Modem, Voice, Call, Messaging, Sms, Sim, Signal)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+zbus.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+omatel-mock.workspace = true
+tokio.workspace = true
