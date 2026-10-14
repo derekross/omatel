@@ -36,6 +36,10 @@ pub struct Cli {
     /// Show the call in progress.
     #[arg(long)]
     pub in_call: bool,
+    /// Open a new contact with this number filled in (Messages' "Add to
+    /// contacts").
+    #[arg(long, value_name = "NUMBER")]
+    pub add: Option<String>,
     /// Import contacts from a .vcf file.
     #[arg(long, value_name = "FILE")]
     pub import: Option<std::path::PathBuf>,

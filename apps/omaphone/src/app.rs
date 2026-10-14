@@ -403,6 +403,12 @@ impl Ui {
         } else if cli.keypad {
             self.views.set_visible_child_name("keypad");
         }
+        if let Some(n) = &cli.add {
+            self.top.set_visible_child_name("main");
+            self.views.set_visible_child_name("contacts");
+            self.nav.pop_to_tag("root");
+            self.edit_contact(None, Some(n.trim().to_string()));
+        }
         if let Some(uri) = &cli.uri {
             match util::parse_dial_uri(uri) {
                 Some(n) => {
