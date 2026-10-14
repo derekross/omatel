@@ -1196,6 +1196,7 @@ dependencies = [
  "omatel-mock",
  "omatel-notify",
  "omatel-store",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",

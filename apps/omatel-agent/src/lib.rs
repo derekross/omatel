@@ -385,10 +385,12 @@ async fn attach_when_present(agent: &Arc<Agent>) -> anyhow::Result<()> {
                 }
             }
             Some(sig) = async { match sms_added.as_mut() { Some(s) => s.next().await, None => std::future::pending().await } } => {
+                // `received` is false for messages the modem had stored
+                // (the bridge's first fetch, MM's storage at start-up):
+                // those are ours to keep too. Our own sends are SUBMIT
+                // PDUs, which handle_incoming leaves alone.
                 if let Ok(a) = sig.args() {
-                    if a.received {
-                        tokio::spawn(sms::handle_incoming(agent.clone(), a.path.clone()));
-                    }
+                    tokio::spawn(sms::handle_incoming(agent.clone(), a.path.clone()));
                 }
             }
             Some(sig) = removed.next() => {
