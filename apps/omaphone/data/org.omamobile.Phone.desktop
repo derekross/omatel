@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Phone
+GenericName=Phone
+Comment=Make and take calls, and see your call history and contacts
+Exec=omaphone %u
+Icon=org.omamobile.Phone
+Terminal=false
+Categories=GTK;Network;Telephony;
+Keywords=phone;call;dial;dialer;dialpad;contacts;recents;
+MimeType=x-scheme-handler/tel;x-scheme-handler/callto;
+StartupNotify=true
+StartupWMClass=org.omamobile.Phone
+X-Purism-FormFactor=Workstation;Mobile;
