@@ -1,5 +1,27 @@
 [package]
 name = "omamessages"
+description = "Messages: SMS for Omarchy Mobile"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+omatel-api.workspace = true
+omatel-store.workspace = true
+omatel-contacts.workspace = true
+omatel-theme.workspace = true
+gtk4.workspace = true
+libadwaita.workspace = true
+zbus.workspace = true
+futures-util.workspace = true
+async-channel.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-journald.workspace = true
+chrono.workspace = true
