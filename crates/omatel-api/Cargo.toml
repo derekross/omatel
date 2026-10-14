@@ -1,0 +1,19 @@
+[package]
+name = "omatel-api"
+description = "The session-bus API of omatel's agent (org.omamobile.Phone1, org.omamobile.Messages1) and the shared settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+zbus.workspace = true
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

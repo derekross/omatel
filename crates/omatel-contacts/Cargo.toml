@@ -1,0 +1,18 @@
+[package]
+name = "omatel-contacts"
+description = "omatel's address book: a vCard folder (vdir), search, T9 and number matching"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing.workspace = true
+thiserror.workspace = true
+phonenumber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,5 @@
+[package]
+name = "omatel-notify"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

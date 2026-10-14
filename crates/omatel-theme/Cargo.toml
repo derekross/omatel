@@ -1,0 +1,15 @@
+[package]
+name = "omatel-theme"
+description = "The Omarchy theme for omatel's GTK apps, from colors.toml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing.workspace = true
+gtk4.workspace = true
+libadwaita.workspace = true

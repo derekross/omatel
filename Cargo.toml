@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/omatel-mm",
+    "crates/omatel-mock",
+    "crates/omatel-store",
+    "crates/omatel-contacts",
+    "crates/omatel-theme",
+    "crates/omatel-notify",
+    "crates/omatel-api",
+    "apps/omatel-agent",
+    "apps/omaphone",
+    "apps/omamessages",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+rust-version = "1.87"
+repository = "https://github.com/derekross/omatel"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
+[workspace.dependencies]
+omatel-mm = { path = "crates/omatel-mm" }
+omatel-mock = { path = "crates/omatel-mock" }
+omatel-store = { path = "crates/omatel-store" }
+omatel-contacts = { path = "crates/omatel-contacts" }
+omatel-theme = { path = "crates/omatel-theme" }
+omatel-notify = { path = "crates/omatel-notify" }
+omatel-api = { path = "crates/omatel-api" }
+
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-journald = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+clap = { version = "4", features = ["derive", "env"] }
+async-channel = "2"
+futures-util = "0.3"
+zbus = "5"
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "signal"] }
+rusqlite = "0.40"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+phonenumber = "0.3"
+tempfile = "3"
+
+gtk4 = { version = "0.11", features = ["v4_14"] }
+libadwaita = { version = "0.9", features = ["v1_5"] }
+
+[profile.release]
+opt-level = 3
+# Stripped by the linker, so a cross-built binary needs no aarch64 strip.
+strip = true

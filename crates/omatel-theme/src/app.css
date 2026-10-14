@@ -1,0 +1,147 @@
+/* omatel: shared styles for Phone and Messages. Sizes are in logical
+   pixels for a 480 px wide portrait phone; touch targets are at least
+   48 px. Colours are libadwaita variables (the Omarchy palette). */
+
+/* Dialpad */
+.dialpad-key {
+  min-width: 88px;
+  min-height: 64px;
+  border-radius: 999px;
+  padding: 0;
+}
+.dialpad-key .digit {
+  font-size: 28px;
+  font-weight: 400;
+}
+.dialpad-key .letters {
+  font-size: 11px;
+  letter-spacing: 1px;
+  opacity: 0.7;
+}
+.dial-display {
+  font-size: 32px;
+  font-weight: 300;
+  font-feature-settings: "tnum";
+}
+.dial-display-small {
+  font-size: 24px;
+}
+
+/* Round action buttons: call, hang up, answer, decline */
+.call-button {
+  min-width: 72px;
+  min-height: 72px;
+  border-radius: 999px;
+  background-color: var(--success-bg-color);
+  color: var(--success-fg-color);
+}
+.call-button:disabled {
+  opacity: 0.5;
+}
+.hangup-button {
+  min-width: 72px;
+  min-height: 72px;
+  border-radius: 999px;
+  background-color: var(--destructive-bg-color);
+  color: var(--destructive-fg-color);
+}
+.call-button image, .hangup-button image {
+  -gtk-icon-size: 32px;
+}
+
+/* In-call toggles (mute, speaker, keypad) */
+.incall-toggle {
+  min-width: 72px;
+  min-height: 72px;
+  border-radius: 999px;
+}
+.incall-toggle image {
+  -gtk-icon-size: 28px;
+}
+.incall-toggle:checked {
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+}
+.incall-label {
+  font-size: 13px;
+  opacity: 0.8;
+}
+.caller-name {
+  font-size: 30px;
+  font-weight: 600;
+}
+.caller-number {
+  font-size: 18px;
+  opacity: 0.8;
+}
+.call-status {
+  font-size: 16px;
+  font-feature-settings: "tnum";
+}
+
+/* Avatars without a photo */
+.initials {
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 999px;
+  background-color: alpha(var(--accent-bg-color), 0.25);
+  color: var(--window-fg-color);
+  font-weight: 700;
+}
+.initials-large {
+  min-width: 96px;
+  min-height: 96px;
+  font-size: 36px;
+}
+
+/* Rows */
+.missed {
+  color: var(--destructive-bg-color);
+}
+.unread {
+  font-weight: 700;
+}
+.row-meta {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* Emergency warning */
+.emergency-banner {
+  background-color: alpha(var(--warning-bg-color), 0.25);
+  padding: 8px 12px;
+  border-radius: 12px;
+}
+
+/* Message bubbles */
+.bubble {
+  border-radius: 18px;
+  padding: 8px 12px;
+}
+.bubble.incoming {
+  background-color: var(--card-bg-color);
+  color: var(--card-fg-color);
+}
+.bubble.outgoing {
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+}
+.bubble.failed {
+  background-color: alpha(var(--destructive-bg-color), 0.35);
+  color: var(--window-fg-color);
+}
+.bubble-meta {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.day-separator {
+  font-size: 12px;
+  opacity: 0.7;
+  margin: 8px 0;
+}
+.composer {
+  padding: 6px;
+}
+.composer entry, .composer textview {
+  min-height: 44px;
+}
