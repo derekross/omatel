@@ -28,11 +28,13 @@ pub fn install(extra_css: &str) -> Option<gtk::gio::FileMonitor> {
     follow_omarchy_theme()
 }
 
-/// Initials for an avatar-less contact row: "Alex Example" -> "AE".
+/// Initials for an avatar-less contact row: "Alex Example" -> "AE". A
+/// bare number has none ("#"), so digits never pose as initials.
 pub fn initials(name: &str) -> String {
     let mut out: String = name
         .split_whitespace()
         .filter_map(|w| w.chars().find(|c| c.is_alphanumeric()))
+        .filter(|c| c.is_alphabetic())
         .take(2)
         .flat_map(char::to_uppercase)
         .collect();
@@ -50,7 +52,8 @@ mod tests {
     fn initials_from_names() {
         assert_eq!(initials("Alex Example"), "AE");
         assert_eq!(initials("  zoë  "), "Z");
-        assert_eq!(initials("+1 555 0100"), "15");
+        assert_eq!(initials("+1 555 0100"), "#");
+        assert_eq!(initials("(202) 555-0150"), "#");
         assert_eq!(initials(""), "#");
         assert_eq!(initials("Ann Bee Cee"), "AB");
     }

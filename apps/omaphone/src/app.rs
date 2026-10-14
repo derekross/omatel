@@ -491,6 +491,36 @@ impl Ui {
                 }
             }
         });
+        // Mute and the route can change from elsewhere too (the shell's
+        // lock-screen call card): follow the agent's properties.
+        let u = ui.clone();
+        let c = conn.clone();
+        glib::spawn_future_local(async move {
+            let props = async {
+                zbus::fdo::PropertiesProxy::builder(&c)
+                    .destination(omatel_api::PHONE_NAME)?
+                    .path(omatel_api::PHONE_PATH)?
+                    .build()
+                    .await
+            };
+            let Ok(props) = props.await else { return };
+            let Ok(mut s) = props.receive_properties_changed().await else {
+                return;
+            };
+            while let Some(sig) = s.next().await {
+                let Ok(a) = sig.args() else { continue };
+                if a.interface_name().as_str() != "org.omamobile.Phone1" {
+                    continue;
+                }
+                let changed = a.changed_properties();
+                if let Some(m) = changed.get("Muted").and_then(|v| bool::try_from(v).ok()) {
+                    u.show_muted(m);
+                }
+                if let Some(r) = changed.get("Route").and_then(|v| <&str>::try_from(v).ok()) {
+                    u.show_speaker(r == "speaker");
+                }
+            }
+        });
         let u = ui.clone();
         let p = phone.clone();
         glib::spawn_future_local(async move {
@@ -852,6 +882,24 @@ impl Ui {
         if let Some(b) = self.call.dtmf.child().and_downcast::<gtk::Box>() {
             b.append(&pad);
         }
+    }
+
+    /// Show the microphone as muted or not, without asking the agent again.
+    fn show_muted(&self, on: bool) {
+        self.updating.set(true);
+        self.call.mute.set_active(on);
+        self.call.mute.set_icon_name(if on {
+            "microphone-disabled-symbolic"
+        } else {
+            "microphone-sensitivity-high-symbolic"
+        });
+        self.updating.set(false);
+    }
+
+    fn show_speaker(&self, on: bool) {
+        self.updating.set(true);
+        self.call.speaker.set_active(on);
+        self.updating.set(false);
     }
 
     /// The proxy for a request about the shown call, unless it's a fake.

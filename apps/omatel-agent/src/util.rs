@@ -25,8 +25,12 @@ impl Launcher {
                 let Some((program, rest)) = args.split_first() else {
                     return;
                 };
-                match std::process::Command::new(program)
-                    .args(rest)
+                let mut cmd = std::process::Command::new(program);
+                cmd.args(rest);
+                for (k, v) in session_environment() {
+                    cmd.env(k, v);
+                }
+                match cmd
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
@@ -48,6 +52,35 @@ impl Launcher {
             Launcher::Off => {}
         }
     }
+}
+
+/// The graphical session's variables, from the systemd user manager: the
+/// agent may have started before the compositor imported them, and an
+/// app it opens needs them to find the display.
+fn session_environment() -> Vec<(String, String)> {
+    const WANTED: &[&str] = &[
+        "WAYLAND_DISPLAY",
+        "DISPLAY",
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_TYPE",
+        "HYPRLAND_INSTANCE_SIGNATURE",
+    ];
+    let Ok(out) = std::process::Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return Vec::new();
+    };
+    parse_environment(&String::from_utf8_lossy(&out.stdout), WANTED)
+}
+
+fn parse_environment(text: &str, wanted: &[&str]) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|l| l.split_once('='))
+        .filter(|(k, _)| wanted.contains(k))
+        .map(|(k, v)| (k.to_string(), v.trim_matches('\'').to_string()))
+        .collect()
 }
 
 /// The modem's state as `org.omamobile.Phone1.ModemState` names it.
@@ -146,6 +179,21 @@ mod tests {
         assert_eq!(modem_state_name(11, 0, false), "ready");
         assert_eq!(modem_state_name(8, 0, true), "emergency-only");
         assert_eq!(modem_state_name(0, 0, false), "starting");
+    }
+
+    #[test]
+    fn session_environment_lines() {
+        let env = parse_environment(
+            "HOME=/home/u\nWAYLAND_DISPLAY=wayland-1\nDISPLAY=:0\nX=1\n",
+            &["WAYLAND_DISPLAY", "DISPLAY"],
+        );
+        assert_eq!(
+            env,
+            vec![
+                ("WAYLAND_DISPLAY".into(), "wayland-1".into()),
+                ("DISPLAY".into(), ":0".into())
+            ]
+        );
     }
 
     #[test]

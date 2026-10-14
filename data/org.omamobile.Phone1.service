@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=org.omamobile.Phone1
+Exec=/usr/bin/omatel-agent
+SystemdService=omatel-agent.service

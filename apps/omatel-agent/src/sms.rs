@@ -93,7 +93,7 @@ async fn store_one(agent: &Arc<Agent>, path: &OwnedObjectPath) -> anyhow::Result
     }
     match stored {
         Some((conversation, id)) => {
-            tracing::info!(path = %path, conversation, message = id, "SMS stored");
+            tracing::info!(path = %path, conversation, message_id = id, "SMS stored");
             iface::messages_changed(agent, conversation).await;
             notify(agent, conversation).await;
         }
@@ -256,7 +256,7 @@ pub async fn retry(agent: &Arc<Agent>, id: i64) -> bool {
 }
 
 async fn fail(agent: &Arc<Agent>, conversation: i64, id: i64, why: &str) {
-    tracing::info!(message = id, why, "SMS not sent");
+    tracing::info!(message_id = id, why, "SMS not sent");
     let _ = agent
         .messages
         .lock()
@@ -308,7 +308,7 @@ async fn deliver(agent: Arc<Agent>, conversation: i64, id: i64) {
         let _ = agent.messages.lock().unwrap().set_mm_path(id, None);
         return fail(&agent, conversation, id, "not sent").await;
     }
-    tracing::info!(path = %path, message = id, "SMS sent");
+    tracing::info!(path = %path, message_id = id, "SMS sent");
     let _ = agent
         .messages
         .lock()
@@ -328,7 +328,7 @@ async fn deliver(agent: Arc<Agent>, conversation: i64, id: i64) {
         };
         match tokio::time::timeout(DELIVERY_WAIT, wait).await {
             Ok(Some(state)) => {
-                tracing::info!(path = %path, message = id, state = state.as_str(), "delivery report");
+                tracing::info!(path = %path, message_id = id, state = state.as_str(), "delivery report");
                 let why = (state == MessageState::Failed).then_some("not delivered");
                 let _ = agent.messages.lock().unwrap().set_state(id, state, why);
                 iface::messages_changed(&agent, conversation).await;

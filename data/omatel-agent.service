@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The background service of Phone and Messages (omatel-agent): rings for
+# incoming calls, writes the call log, stores every incoming SMS and
+# raises notifications. Enable it once per user:
+#   systemctl --user enable --now omatel-agent
+# The apps also start it through D-Bus activation when they need it.
+[Unit]
+Description=Phone and Messages background service
+Documentation=file:///usr/share/doc/omatel/README.md
+After=dbus.socket
+
+[Service]
+Type=dbus
+BusName=org.omamobile.Phone1
+ExecStart=/usr/bin/omatel-agent
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictRealtime=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target

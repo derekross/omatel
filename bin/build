@@ -1,0 +1,6 @@
+#!/bin/sh
+# Build omatel for this machine: the agent and both apps.
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+cargo build --release --locked -p omaphone -p omamessages -p omatel-agent "$@"
