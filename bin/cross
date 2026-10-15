@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Cross-compile omatel (omaphone, omamessages, omatel-agent) for aarch64 phones on an x86_64 machine, without
+# Cross-compile omatel-agent for aarch64 phones on an x86_64 machine, without
 # qemu: an x86_64 Rust with the aarch64 target, clang and lld in a Docker
 # container (Arch Linux), linking against an aarch64 sysroot taken from an
 # Arch Linux ARM container with the phone's libraries.
 #
 #   bin/cross sysroot     build the sysroot (once, and after library updates)
-#   bin/cross build       build the three binaries in target/aarch64-unknown-linux-gnu/release/
-#   bin/cross package     build the pacman package (pkgbuild/omatel-*-aarch64.pkg.tar.zst)
+#   bin/cross build       build target/aarch64-unknown-linux-gnu/release/omatel-agent
+#   bin/cross package     build the pacman package (pkgbuild/omatel-agent-*-aarch64.pkg.tar.zst)
 #
 # Environment:
 #   OMATEL_SYSROOT   sysroot directory (default ~/.cache/omatel/sysroot-aarch64,
@@ -91,12 +91,12 @@ TARGET_FLAG_T=--target=$TARGET
 case ${1:-build} in
   sysroot) sysroot ;;
   build)
-    in_tools cargo build --release --locked --target "$TARGET" -p omaphone -p omamessages -p omatel-agent
-    ls -l "$ROOT"/target/$TARGET/release/{omaphone,omamessages,omatel-agent} ;;
+    in_tools cargo build --release --locked --target "$TARGET" -p omatel-agent
+    ls -l "$ROOT/target/$TARGET/release/omatel-agent" ;;
   package)
     "$0" build
     conf=$(mktemp); cat /etc/makepkg.conf >"$conf"; echo 'CARCH="aarch64"' >>"$conf"
     (cd "$ROOT/pkgbuild" && OMATEL_PREBUILT="$ROOT/target/$TARGET/release" makepkg -f --nodeps --config "$conf"); rm -f "$conf"
-    ls -l "$ROOT"/pkgbuild/omatel-*-aarch64.pkg.tar.* ;;
+    ls -l "$ROOT"/pkgbuild/omatel-agent-*-aarch64.pkg.tar.* ;;
   *) sed -n '2,20p' "$0"; exit 2 ;;
 esac

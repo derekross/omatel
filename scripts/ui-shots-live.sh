@@ -6,12 +6,21 @@
 # rings, is answered, muted and hung up through the agent's D-Bus API; a
 # message arrives and one is sent. Also records the agent's and the apps'
 # memory and the time to the first frame (on this machine, not a phone).
+# The apps come from their own checkouts: OMAPHONE (default ../omaphone)
+# and OMAMESSAGES (default ../omamessages), built here in release mode.
 # Writes target/ui-shots/live/. Needs Docker and the omacam-uitest:2 image.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 IMAGE=${UI_IMAGE:-omacam-uitest:2}
-cargo build --release -p omaphone -p omamessages -p omatel-agent -p omatel-mock \
-  --bin omaphone --bin omamessages --bin omatel-agent --bin omatel-demo-data --bin omatel-mock-mm
+phone_dir=${OMAPHONE:-$PWD/../omaphone}
+messages_dir=${OMAMESSAGES:-$PWD/../omamessages}
+for d in "$phone_dir" "$messages_dir"; do
+  [[ -f $d/Cargo.toml ]] || { echo "no app checkout at $d (set OMAPHONE / OMAMESSAGES)" >&2; exit 1; }
+done
+cargo build --release -p omatel-agent -p omatel-mock \
+  --bin omatel-agent --bin omatel-demo-data --bin omatel-mock-mm
+(cd "$phone_dir" && cargo build --release --locked)
+(cd "$messages_dir" && cargo build --release --locked)
 out=target/ui-shots/live
 rm -rf "$out"; mkdir -p "$out"; chmod 777 "$out"
 size=${SIZE:-456x900}
@@ -19,9 +28,11 @@ passwd=$(mktemp); trap 'rm -f "$passwd"' EXIT
 printf 'root:x:0:0::/root:/bin/bash\nuser:x:%s:%s::/tmp/home:/bin/bash\n' "$(id -u)" "$(id -g)" >"$passwd"
 chmod 644 "$passwd"
 mounts=()
-for b in omaphone omamessages omatel-agent omatel-demo-data omatel-mock-mm; do
+for b in omatel-agent omatel-demo-data omatel-mock-mm; do
   mounts+=(-v "$PWD/target/release/$b:/usr/local/bin/$b:ro")
 done
+mounts+=(-v "$phone_dir/target/release/omaphone:/usr/local/bin/omaphone:ro")
+mounts+=(-v "$messages_dir/target/release/omamessages:/usr/local/bin/omamessages:ro")
 docker run --rm --user "$(id -u):$(id -g)" -e W="${size%x*}" -e H="${size#*x}" \
   "${mounts[@]}" -v "$passwd:/etc/passwd:ro" -v "$PWD/$out:/out" "$IMAGE" bash -c '
   set -u
