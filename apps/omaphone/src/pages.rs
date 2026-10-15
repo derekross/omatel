@@ -46,7 +46,7 @@ fn heading_block(name: Option<&str>, title: &str, subtitle: Option<&str>) -> gtk
     b
 }
 
-/// A row of big labelled round buttons (Call, Message, ...).
+/// A row of big labeled round buttons (Call, Message, ...).
 /// An icon, a label and what the button does.
 type Action<'a> = (&'a str, &'a str, Rc<dyn Fn()>);
 
@@ -202,7 +202,7 @@ impl Ui {
                 "non-starred-symbolic"
             })
             .active(c.starred())
-            .tooltip_text("Favourite")
+            .tooltip_text("Favorite")
             .build();
         let ui = self.clone();
         let uid_s = uid.to_string();
@@ -284,7 +284,7 @@ impl Ui {
         name.set_text(&contact.name);
         name_group.add(&name);
         let star = adw::SwitchRow::builder()
-            .title("Favourite")
+            .title("Favorite")
             .active(contact.starred())
             .build();
         name_group.add(&star);
@@ -564,7 +564,7 @@ impl Ui {
                 }
                 ui.nav.pop();
                 ui.refresh_recents();
-                ui.refresh_favourites();
+                ui.refresh_favorites();
             });
             content.append(&del);
         }

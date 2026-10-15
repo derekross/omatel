@@ -53,7 +53,7 @@ package_omatel-agent() {
 }
 
 package_omaphone() {
-  pkgdesc="Phone: dialpad with smart dial, call log, favourites, contacts and the in-call screen"
+  pkgdesc="Phone: dialpad with smart dial, call log, favorites, contacts and the in-call screen"
   depends=('omatel-agent' 'gcc-libs' 'glib2' 'glibc' 'gtk4>=4.14' 'libadwaita>=1.5' 'sqlite' 'hicolor-icon-theme')
   install=omatel-apps.install
   _common

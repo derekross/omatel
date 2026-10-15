@@ -1,6 +1,6 @@
 [package]
 name = "omaphone"
-description = "Phone: dialpad, call log, favourites, contacts and the in-call screen for Omarchy Mobile"
+description = "Phone: dialpad, call log, favorites, contacts and the in-call screen for Omarchy Mobile"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

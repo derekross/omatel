@@ -9,7 +9,7 @@ use gtk4 as gtk;
 
 pub use theme::{follow_omarchy_theme, Mode, Palette, Rgb};
 
-/// The stylesheet both apps use, on top of libadwaita's. Colours come from
+/// The stylesheet both apps use, on top of libadwaita's. Colors come from
 /// libadwaita's variables, so they follow the Omarchy palette.
 pub const APP_CSS: &str = include_str!("app.css");
 

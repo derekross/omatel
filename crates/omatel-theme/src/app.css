@@ -1,6 +1,6 @@
 /* omatel: shared styles for Phone and Messages. Sizes are in logical
    pixels for a 480 px wide portrait phone; touch targets are at least
-   48 px. Colours are libadwaita variables (the Omarchy palette). */
+   48 px. Colors are libadwaita variables (the Omarchy palette). */
 
 /* Dialpad */
 .dialpad-key {

@@ -17,7 +17,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// The category that marks a favourite (starred) contact.
+/// The category that marks a favorite (starred) contact.
 pub const STARRED: &str = "Starred";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,7 +103,8 @@ impl Contact {
         self.categories.iter().any(|c| {
             c.eq_ignore_ascii_case(STARRED)
                 || c.eq_ignore_ascii_case("favorites")
-                || c.eq_ignore_ascii_case("favourites")
+                // Other apps' British category name.
+                || c.eq_ignore_ascii_case("favourites") // spelling: kept
         })
     }
 
@@ -117,7 +118,7 @@ impl Contact {
             self.categories.retain(|c| {
                 !(c.eq_ignore_ascii_case(STARRED)
                     || c.eq_ignore_ascii_case("favorites")
-                    || c.eq_ignore_ascii_case("favourites"))
+                    || c.eq_ignore_ascii_case("favourites")) // spelling: kept
             });
         }
     }

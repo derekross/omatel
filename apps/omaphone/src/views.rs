@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The four tabs: Favourites, Recents, Contacts and Keypad.
+//! The four tabs: Favorites, Recents, Contacts and Keypad.
 
 use std::rc::Rc;
 
@@ -56,10 +56,10 @@ pub fn clear_list(l: &gtk::ListBox) {
 
 impl Ui {
     pub fn build_tabs(self: &Rc<Self>) {
-        // Favourites
-        let fav = scrolled_column(&self.favourites);
+        // Favorites
+        let fav = scrolled_column(&self.favorites);
         self.views
-            .add_titled_with_icon(&fav, Some("favourites"), "Favourites", "starred-symbolic");
+            .add_titled_with_icon(&fav, Some("favorites"), "Favorites", "starred-symbolic");
         // Recents
         let rec = scrolled_column(&self.recents);
         self.views.add_titled_with_icon(
@@ -258,20 +258,20 @@ impl Ui {
         }
     }
 
-    pub fn refresh_favourites(self: &Rc<Self>) {
-        clear_box(&self.favourites);
+    pub fn refresh_favorites(self: &Rc<Self>) {
+        clear_box(&self.favorites);
         let book = self.book.borrow();
         let mut starred = book.starred();
         if let Some(log) = &self.log {
-            if let Ok(order) = log.favourites_order() {
+            if let Ok(order) = log.favorites_order() {
                 starred
                     .sort_by_key(|c| order.iter().position(|u| *u == c.uid).unwrap_or(usize::MAX));
             }
         }
         if !starred.is_empty() {
-            self.favourites.append(
+            self.favorites.append(
                 &gtk::Label::builder()
-                    .label("Favourites")
+                    .label("Favorites")
                     .xalign(0.0)
                     .css_classes(["heading"])
                     .build(),
@@ -296,7 +296,7 @@ impl Ui {
                 );
                 let tile = gtk::Button::builder()
                     .child(&v)
-                    .css_classes(["flat", "favourite-tile"])
+                    .css_classes(["flat", "favorite-tile"])
                     .tooltip_text("Call")
                     .build();
                 let ui = self.clone();
@@ -317,7 +317,7 @@ impl Ui {
                 tile.add_controller(g);
                 flow.append(&tile);
             }
-            self.favourites.append(&flow);
+            self.favorites.append(&flow);
         }
         let frequent = self
             .log
@@ -325,7 +325,7 @@ impl Ui {
             .and_then(|l| l.frequent(6).ok())
             .unwrap_or_default();
         if !frequent.is_empty() {
-            self.favourites.append(
+            self.favorites.append(
                 &gtk::Label::builder()
                     .label("Frequent")
                     .xalign(0.0)
@@ -358,13 +358,13 @@ impl Ui {
                 row.connect_activated(move |_| ui.show_details(&raw));
                 list.append(&row);
             }
-            self.favourites.append(&list);
+            self.favorites.append(&list);
         }
-        if self.favourites.first_child().is_none() {
-            self.favourites.append(
+        if self.favorites.first_child().is_none() {
+            self.favorites.append(
                 &adw::StatusPage::builder()
                     .icon_name("starred-symbolic")
-                    .title("No favourites yet")
+                    .title("No favorites yet")
                     .description("Star a contact to call them with one tap.")
                     .vexpand(true)
                     .build(),

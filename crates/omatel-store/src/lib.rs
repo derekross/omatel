@@ -4,7 +4,7 @@
 //! - `messages.db`: conversations, participants, messages (with a
 //!   `transport` column: `sms` now, `mms` from T3, room for anything
 //!   later), MMS parts, and an FTS5 index over message text;
-//! - `calls.db`: the call log and the favourites order;
+//! - `calls.db`: the call log and the favorites order;
 //! - `blocked.db`: one block list, shared by both apps.
 //!
 //! Every database runs in WAL mode with `synchronous=FULL`, so a commit is

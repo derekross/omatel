@@ -121,7 +121,7 @@ pub fn full_time(ms: i64) -> String {
 }
 
 /// How a call-log entry looks: icon, whether it's drawn in the warning
-/// colour, and a word for it.
+/// color, and a word for it.
 pub fn outcome_look(
     direction: CallDirection,
     outcome: CallOutcome,

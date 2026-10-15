@@ -24,11 +24,11 @@ code is used.
   letters on the keys, or by their numbers. Long-press 0 for +.
   Characters after `,` in a number are sent as touch tones once the call
   is answered.
-- Favourites (your starred contacts, plus the numbers you call most),
+- Favorites (your starred contacts, plus the numbers you call most),
   Recents (the call log, with missed calls in red), and Contacts. All
   three are tabs.
 - Contacts: search, a contact page, an editor (name, numbers with labels,
-  emails, a note, favourite), importing and exporting `.vcf` files, and
+  emails, a note, favorite), importing and exporting `.vcf` files, and
   blocking.
 - The in-call screen: a call timer, mute, speaker, a keypad for touch
   tones, and hang up. The answer screen offers Answer, Decline and Reply

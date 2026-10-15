@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Conversations and messages (`messages.db`).
 //!
-//! A conversation is keyed by its `address`: the normalised number of a
+//! A conversation is keyed by its `address`: the normalized number of a
 //! one-to-one thread, or the sorted, comma-joined numbers of a group (MMS,
 //! T3). Each message carries a `transport` (`sms`, later `mms`), so other
 //! transports fit without a new table. Incoming messages carry a
@@ -207,7 +207,7 @@ pub struct SearchHit {
 /// An incoming SMS to store.
 #[derive(Debug, Clone)]
 pub struct NewIncoming<'a> {
-    /// Normalised sender (the conversation key).
+    /// Normalized sender (the conversation key).
     pub address: &'a str,
     /// The sender as the network gave it.
     pub raw_number: &'a str,

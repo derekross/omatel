@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Phone numbers: E.164 normalisation and display through the
+//! Phone numbers: E.164 normalization and display through the
 //! `phonenumber` crate (a libphonenumber port, Apache-2.0, compatible with
 //! GPL-3.0), and a loose match for numbers that don't parse, the way
 //! Android's PhoneNumberUtils.compare falls back to trailing digits.

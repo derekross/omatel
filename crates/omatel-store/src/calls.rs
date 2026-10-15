@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The call log (`calls.db`), written by the agent from call state changes
-//! (the modem keeps no history), and the favourites order.
+//! (the modem keeps no history), and the favorites order.
 
 use std::path::Path;
 
@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{open, Error, Result, EXPORT_VERSION};
 
-const MIGRATIONS: &[&str] = &["CREATE TABLE calls (
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE calls (
         id INTEGER PRIMARY KEY,
         number TEXT NOT NULL,
         raw_number TEXT NOT NULL,
@@ -23,10 +24,14 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE calls (
     );
     CREATE INDEX calls_started ON calls (started_at DESC);
     CREATE INDEX calls_number ON calls (number);
-    CREATE TABLE favourites (
+    CREATE TABLE favourites ( -- spelling: kept (schema 1 as shipped; schema 2 renames it)
         uid TEXT PRIMARY KEY,
         position INTEGER NOT NULL
-    );"];
+    );",
+    // Schema 2: US English. A rename, so databases from 0.1.0 keep their
+    // order.
+    "ALTER TABLE favourites RENAME TO favorites; -- spelling: kept",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -56,7 +61,7 @@ pub enum CallOutcome {
     Rejected,
     /// Incoming from a blocked number, hung up at once.
     Blocked,
-    /// Outgoing, never answered (busy, no answer, cancelled).
+    /// Outgoing, never answered (busy, no answer, canceled).
     Unanswered,
     /// Outgoing, the network or modem refused it.
     Failed,
@@ -90,7 +95,7 @@ impl CallOutcome {
 pub struct CallRecord {
     #[serde(default)]
     pub id: i64,
-    /// The normalised number (E.164 when it parses).
+    /// The normalized number (E.164 when it parses).
     pub number: String,
     /// The number as the network gave it.
     pub raw_number: String,
@@ -186,7 +191,7 @@ impl CallLog {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// The calls with one (normalised) number, newest first.
+    /// The calls with one (normalized) number, newest first.
     pub fn for_number(&self, number: &str) -> Result<Vec<CallRecord>> {
         let mut st = self.conn.prepare(&format!(
             "SELECT {COLUMNS} FROM calls WHERE number = ?1 ORDER BY started_at DESC, id DESC"
@@ -248,21 +253,21 @@ impl CallLog {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// The favourites order: contact UIDs, first to last.
-    pub fn favourites_order(&self) -> Result<Vec<String>> {
+    /// The favorites order: contact UIDs, first to last.
+    pub fn favorites_order(&self) -> Result<Vec<String>> {
         let mut st = self
             .conn
-            .prepare("SELECT uid FROM favourites ORDER BY position")?;
+            .prepare("SELECT uid FROM favorites ORDER BY position")?;
         let rows = st.query_map([], |r| r.get(0))?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    pub fn set_favourites_order(&self, uids: &[String]) -> Result<()> {
+    pub fn set_favorites_order(&self, uids: &[String]) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM favourites", [])?;
+        tx.execute("DELETE FROM favorites", [])?;
         for (i, u) in uids.iter().enumerate() {
             tx.execute(
-                "INSERT OR IGNORE INTO favourites (uid, position) VALUES (?1, ?2)",
+                "INSERT OR IGNORE INTO favorites (uid, position) VALUES (?1, ?2)",
                 params![u, i as i64],
             )?;
         }
@@ -398,10 +403,27 @@ mod tests {
     }
 
     #[test]
-    fn favourites_and_frequent() {
+    fn schema_1_database_keeps_its_favorites() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("calls.db");
+        {
+            let conn = Connection::open(&p).unwrap();
+            crate::migrate(&conn, &MIGRATIONS[..1]).unwrap();
+            conn.execute(
+                "INSERT INTO favourites (uid, position) VALUES ('a', 0)", // spelling: kept
+                [],
+            )
+            .unwrap();
+        }
+        let log = CallLog::open(&p).unwrap();
+        assert_eq!(log.favorites_order().unwrap(), vec!["a"]);
+    }
+
+    #[test]
+    fn favorites_and_frequent() {
         let log = CallLog::open_in_memory().unwrap();
-        log.set_favourites_order(&["b".into(), "a".into()]).unwrap();
-        assert_eq!(log.favourites_order().unwrap(), vec!["b", "a"]);
+        log.set_favorites_order(&["b".into(), "a".into()]).unwrap();
+        assert_eq!(log.favorites_order().unwrap(), vec!["b", "a"]);
         for t in 0..3 {
             log.insert(&call(
                 "+12025550103",

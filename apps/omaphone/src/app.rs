@@ -30,7 +30,7 @@ const EXTRA_CSS: &str = "
 .incall-page, .incoming-page { padding: 24px 16px; }
 .dtmf-digits { font-size: 22px; font-feature-settings: \"tnum\"; }
 .emergency-title { font-size: 26px; font-weight: 700; }
-.favourite-tile { padding: 10px 4px; border-radius: 16px; }
+.favorite-tile { padding: 10px 4px; border-radius: 16px; }
 .route-note { font-size: 12px; opacity: 0.7; }
 .call-button, .hangup-button { padding: 0; min-width: 76px; min-height: 76px; }
 .incall-toggle { padding: 0; }
@@ -115,7 +115,7 @@ pub struct Ui {
     pub suggestions: gtk::ListBox,
     pub call_button: gtk::Button,
     // Other tabs
-    pub favourites: gtk::Box,
+    pub favorites: gtk::Box,
     pub recents: gtk::Box,
     pub contacts_list: gtk::ListBox,
     pub contacts_search: gtk::SearchEntry,
@@ -231,7 +231,7 @@ impl Ui {
             display,
             suggestions,
             call_button,
-            favourites: gtk::Box::new(gtk::Orientation::Vertical, 18),
+            favorites: gtk::Box::new(gtk::Orientation::Vertical, 18),
             recents: gtk::Box::new(gtk::Orientation::Vertical, 0),
             contacts_list,
             contacts_search,
@@ -398,8 +398,8 @@ impl Ui {
             self.views.set_visible_child_name("contacts");
         } else if cli.recents {
             self.views.set_visible_child_name("recents");
-        } else if cli.favourites {
-            self.views.set_visible_child_name("favourites");
+        } else if cli.favorites {
+            self.views.set_visible_child_name("favorites");
         } else if cli.keypad {
             self.views.set_visible_child_name("keypad");
         }
@@ -529,7 +529,7 @@ impl Ui {
             };
             while s.next().await.is_some() {
                 u.refresh_recents();
-                u.refresh_favourites();
+                u.refresh_favorites();
             }
         });
         let u = ui.clone();
@@ -1145,7 +1145,7 @@ impl Ui {
     }
 
     pub fn refresh_all(self: &Rc<Self>) {
-        self.refresh_favourites();
+        self.refresh_favorites();
         self.refresh_recents();
         self.refresh_contacts();
     }

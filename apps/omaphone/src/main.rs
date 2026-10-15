@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! omaphone: the phone app of Omarchy Mobile, shown as "Phone": dialpad
-//! with smart dial, call log, favourites, contacts, and the in-call and
+//! with smart dial, call log, favorites, contacts, and the in-call and
 //! answer screens. Calls go through omatel-agent's org.omamobile.Phone1.
 
 mod app;
@@ -24,9 +24,9 @@ pub struct Cli {
     /// Open on the call log.
     #[arg(long)]
     pub recents: bool,
-    /// Open on the favourites.
+    /// Open on the favorites.
     #[arg(long)]
-    pub favourites: bool,
+    pub favorites: bool,
     /// Open on the dialpad.
     #[arg(long)]
     pub keypad: bool,

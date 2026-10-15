@@ -3,7 +3,7 @@
 //! in a headless compositor and for checks on a phone someone is using:
 //! `--script "wait 1; tab keypad; type 2025; shot /tmp/k.png; quit"`.
 //!
-//! Steps: `wait SECONDS`, `tab favourites|recents|contacts|keypad`,
+//! Steps: `wait SECONDS`, `tab favorites|recents|contacts|keypad`,
 //! `type DIGITS` (into the dialpad), `open-contact N` (the Nth contact,
 //! from 1), `edit-contact`, `new-contact`, `back`, `details N` (the Nth
 //! recent call), `fake-incoming NUMBER` and `fake-call NUMBER STATE`
@@ -30,7 +30,7 @@ pub enum Step {
     Quit,
 }
 
-pub const TABS: &[&str] = &["favourites", "recents", "contacts", "keypad"];
+pub const TABS: &[&str] = &["favorites", "recents", "contacts", "keypad"];
 
 pub fn parse(text: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
