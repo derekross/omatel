@@ -30,13 +30,13 @@ SOFTWARE.
 
 Parts are taken from omacam (https://github.com/derekross/omacam, the same
 author, GPL-3.0-or-later): the journal logging set-up, the apps' window
-screenshots for tests, and bin/cross.
+screenshots for tests (now in the app repositories), and bin/cross.
 
 crates/omatel-mm declares ModemManager's D-Bus interface names, member
 signatures and enum values (ModemManager 1.24: introspection/*.xml and
 include/ModemManager-enums.h). They are written out again from those
 interface descriptions; no ModemManager code is included. Phone and
-Messages follow the behavior and layout of AOSP's Dialer and Messaging
+Messages (in their own repositories) follow the behavior and layout of AOSP's Dialer and Messaging
 apps; no AOSP code is included. The icons are original artwork.
 
 The omatel binaries link these Rust crates statically, each under its own

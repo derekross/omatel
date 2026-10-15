@@ -1,5 +1,9 @@
 # omatel's architecture
 
+omatel is the shared core: the crates below and `omatel-agent`. Phone
+(`omaphone`) and Messages (`omamessages`) are in their own repositories and
+use the crates as git dependencies pinned to an omatel release tag.
+
 ## The pieces
 
 ```

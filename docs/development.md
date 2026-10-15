@@ -6,8 +6,8 @@ modem. The design is in `docs/architecture.md`.
 ## Build
 
 ```
-bin/build        # cargo build --release -p omaphone -p omamessages -p omatel-agent
-bin/install      # build and install the three packages (pkgbuild/PKGBUILD)
+bin/build        # cargo build --release -p omatel-agent
+bin/install      # build and install the omatel-agent package (pkgbuild/PKGBUILD)
 ```
 
 You need Rust, pkgconf, gtk4 (4.14 or later), libadwaita (1.5 or later)
@@ -23,8 +23,8 @@ sysroot already has GTK, libadwaita, SQLite and D-Bus.
 
 ```
 bin/cross sysroot     # only without omacam's sysroot (~/.cache/omatel/sysroot-aarch64)
-bin/cross build       # target/aarch64-unknown-linux-gnu/release/{omaphone,omamessages,omatel-agent}
-bin/cross package     # pkgbuild/{omatel-agent,omaphone,omamessages}-<version>-1-aarch64.pkg.tar.zst
+bin/cross build       # target/aarch64-unknown-linux-gnu/release/omatel-agent
+bin/cross package     # pkgbuild/omatel-agent-<version>-1-aarch64.pkg.tar.zst
 ```
 
 ## Tests
@@ -67,10 +67,10 @@ These all run in a headless Weston inside a container, at the size the
 apps get on the Pixel 7 Pro (456x900). They never open a window on your
 desktop.
 
-- `apps/omaphone/ui-shots.sh` and `apps/omamessages/ui-shots.sh`: every
-  page, on fictional demo data, without the agent. The call pages come
-  from the script's `fake-incoming` and `fake-call` steps.
-- `scripts/ui-shots-live.sh`: both apps with the agent and the mock
+- Each app's own repository has a `scripts/ui-shots.sh`: every page, on
+  fictional demo data, without the agent.
+- `scripts/ui-shots-live.sh`: both apps, built from their checkouts next
+  to this one (`OMAPHONE`, `OMAMESSAGES`), with the agent and the mock
   ModemManager running. A call rings, is answered through the agent, is
   muted and is hung up by the far end; a message arrives and a reply goes
   out. It also writes `measurements.txt`: the agent's and the apps'
