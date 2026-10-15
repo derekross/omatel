@@ -20,14 +20,14 @@ docker run --rm --user "$(id -u):$(id -g)" -e W="${size%x*}" -e H="${size#*x}" \
   export LANG=en_US.UTF-8 TZ=UTC OMATEL_REGION=US
   mkdir -m 700 -p $XDG_RUNTIME_DIR $HOME
   /omatel-demo-data >/dev/null
-  # No session bus and no agent: the app shows its "isn't running" banner.
+  # No session bus and no agent: the app shows its "service is not running" banner.
   weston --backend=headless --shell=kiosk --width=$W --height=$H \
     --socket=wayland-9 --idle-time=0 >/tmp/weston.log 2>&1 &
   sleep 2
   WAYLAND_DISPLAY=wayland-9 GSK_RENDERER=cairo timeout 90 /omaphone --script "
     wait 1.5; tab keypad; shot /out/keypad.png;
     type 55501; wait 0.5; shot /out/keypad-typed.png;
-    tab favourites; wait 0.5; shot /out/favourites.png;
+    tab favorites; wait 0.5; shot /out/favorites.png;
     tab recents; wait 0.5; shot /out/recents.png;
     details 1; wait 0.6; shot /out/call-details.png; back; wait 0.4;
     tab contacts; wait 0.5; shot /out/contacts.png;
