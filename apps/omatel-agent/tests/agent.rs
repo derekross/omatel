@@ -59,6 +59,7 @@ async fn rig_with(locked: bool, inline_reply: bool) -> Rig {
     c.phones.push(Phone {
         number: "(202) 555-0100".into(),
         kind: PhoneKind::Mobile,
+        label: String::new(),
     });
     book.save(&c).unwrap();
 

@@ -1,0 +1,55 @@
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.5//EN
+N:Example;Alex;;;
+FN:Alex Example
+ORG:Example Co.;
+item1.TEL;type=pref:(202) 555-0100
+item1.X-ABLabel:_$!<Mobile>!$_
+item2.TEL:+1 202 555 0101
+item2.X-ABLabel:Boat phone
+TEL;type=WORK;type=VOICE:+1 (202) 555-0102
+item3.EMAIL;type=INTERNET;type=HOME;type=pref:alex@example.com
+item4.ADR;type=HOME;type=pref:;;1 Example Street;Springfield;;;
+item4.X-ABADR:us
+item5.URL;type=pref:https\://example.org/alex
+item5.X-ABLabel:_$!<HomePage>!$_
+NOTE:Fictional person\, made up for tests\nSecond line
+BDAY;value=date:1990-01-01
+PHOTO;ENCODING=b;TYPE=PNG:iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAE
+ UlEQVR4nGNocFDAihiGlgQA+gM4Acru2/oAAAAASUVORK5CYII=
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.5//EN
+N:Example;Alex;;;
+FN:Alex Example
+item1.TEL;type=CELL;type=VOICE;type=pref:202.555.0100
+item2.TEL;type=HOME;type=FAX:202-555-0103
+item2.X-ABLabel:_$!<HomeFAX>!$_
+item3.EMAIL;type=INTERNET;type=WORK:alex.work@example.org
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.5//EN
+N:Sample;Jordan;;;
+FN:Jordan Sample
+TEL;type=IPHONE;type=CELL;type=VOICE;type=pref:+12025550104
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.5//EN
+N:;;;;
+FN:
+ORG:Example Hardware;
+X-ABShowAs:COMPANY
+EMAIL;type=INTERNET;type=WORK:shop@example.com
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//Mac OS X 14.5//EN
+N:Book Club
+FN:Book Club
+X-ADDRESSBOOKSERVER-KIND:group
+X-ADDRESSBOOKSERVER-MEMBER:urn:uuid:00000000-0000-0000-0000-000000000001
+END:VCARD

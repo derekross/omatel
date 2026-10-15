@@ -1,0 +1,40 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Sam Sample
+N:Sample;Sam;;;
+EMAIL;TYPE=INTERNET;TYPE=HOME:sam@example.com
+EMAIL;TYPE=INTERNET:sam.sample@example.org
+TEL;TYPE=CELL:+1 202-555-0110
+item1.TEL:(202) 555-0111
+item1.X-ABLabel:Studio
+ADR;TYPE=HOME:;;1 Sample Road;Exampleville;CA;90000;US
+item2.URL:https\://example.com/sam
+item2.X-ABLabel:
+ORG:Example Org
+TITLE:Tester
+BDAY:1985-02-03
+NOTE:Met at the example conference\, 2024\nLikes tea
+PHOTO:https://photos.example.com/sam.jpg
+CATEGORIES:myContacts,starred
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:Taylor Test
+N:Test;Taylor;;;
+TEL;TYPE=WORK:202-555-0112
+TEL;TYPE=HOME:202-555-0113
+CATEGORIES:myContacts
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:Sam Sample
+N:Sample;Sam;;;
+TEL;TYPE=CELL:2025550110
+TEL;TYPE=WORK:+1 202-555-0114
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:
+N:;;;;
+TEL;TYPE=CELL:+1 202-555-0115
+END:VCARD

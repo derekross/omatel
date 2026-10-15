@@ -40,15 +40,18 @@ pub fn seed(data_home: &Path, now: i64) -> anyhow::Result<()> {
         c.phones.push(Phone {
             number: number.to_string(),
             kind: PhoneKind::Mobile,
+            label: String::new(),
         });
         if i == 0 {
             c.phones.push(Phone {
                 number: "+12025550110".into(),
                 kind: PhoneKind::Work,
+                label: String::new(),
             });
             c.emails.push(Email {
                 address: "alex@example.org".into(),
                 kind: "home".into(),
+                label: String::new(),
             });
             c.note = "Fictional person for the demo.".into();
         }

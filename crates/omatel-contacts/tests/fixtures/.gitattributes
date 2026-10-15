@@ -1,0 +1,2 @@
+# Exports keep their CRLF line endings.
+*.vcf -text

@@ -4,12 +4,21 @@
 //! properties the apps edit (FN, N, TEL, EMAIL, NOTE, CATEGORIES) are
 //! parsed; every other line is kept verbatim and written back, so a
 //! contact synced from elsewhere loses nothing when it is edited here.
+//!
+//! Google's and Apple's exports (vCard 3.0) label numbers and addresses
+//! with a property group: `item1.TEL:...` and `item1.X-ABLabel:Boat`. A
+//! label on a TEL or EMAIL becomes [`Phone::label`] or [`Email::label`],
+//! and is written back the same way.
+
+use std::collections::{HashMap, HashSet};
 
 use crate::{Contact, Email, Phone, PhoneKind};
 
 /// One unfolded content line: `group.NAME;PARAM=V:value`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Line {
+    /// The property group (`item1` in `item1.TEL`), as written.
+    pub group: Option<String>,
     pub name: String,
     /// Parameters as (NAME, value) in upper-case names; a vCard 2.1 bare
     /// parameter (`TEL;CELL:`) becomes ("TYPE", "CELL").
@@ -76,7 +85,7 @@ fn split_unquoted(s: &str, sep: char) -> Vec<&str> {
     parts
 }
 
-fn parse_line(raw: &str) -> Option<Line> {
+pub(crate) fn parse_line(raw: &str) -> Option<Line> {
     // The value starts at the first ':' outside a quoted parameter.
     let mut quoted = false;
     let colon = raw.char_indices().find_map(|(i, c)| match c {
@@ -89,8 +98,12 @@ fn parse_line(raw: &str) -> Option<Line> {
     })?;
     let (head, value) = (&raw[..colon], &raw[colon + 1..]);
     let mut parts = split_unquoted(head, ';').into_iter();
-    let name = parts.next()?;
-    let name = name.rsplit('.').next().unwrap_or(name).to_ascii_uppercase();
+    let full = parts.next()?.trim();
+    let (group, name) = match full.rsplit_once('.') {
+        Some((g, n)) => (Some(g.to_string()), n),
+        None => (None, full),
+    };
+    let name = name.to_ascii_uppercase();
     if name.is_empty() {
         return None;
     }
@@ -105,6 +118,7 @@ fn parse_line(raw: &str) -> Option<Line> {
         })
         .collect::<Vec<_>>();
     let mut line = Line {
+        group,
         name,
         params,
         value: value.to_string(),
@@ -230,12 +244,76 @@ fn phone_kind(types: &[String]) -> PhoneKind {
     }
 }
 
+/// Turn a file's bytes into text: UTF-8 with or without a byte-order
+/// mark, UTF-16 with one (some desktop exports), and anything else
+/// read as UTF-8 with replacement characters.
+pub fn text_from_bytes(bytes: &[u8]) -> String {
+    let utf16 = |be: bool| {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|b| {
+                if be {
+                    u16::from_be_bytes([b[0], b[1]])
+                } else {
+                    u16::from_le_bytes([b[0], b[1]])
+                }
+            })
+            .collect();
+        String::from_utf16_lossy(&units)
+    };
+    match bytes {
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        [0xFF, 0xFE, ..] => utf16(false),
+        [0xFE, 0xFF, ..] => utf16(true),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
+/// How many `BEGIN:VCARD` lines `text` holds: the cards a file offers,
+/// including the ones [`parse`] skips.
+pub fn count_cards(text: &str) -> usize {
+    unfold(text.trim_start_matches('\u{feff}'))
+        .iter()
+        .filter(|l| {
+            let l = l.trim().to_ascii_uppercase();
+            l.starts_with("BEGIN:") && l.ends_with(":VCARD")
+        })
+        .count()
+}
+
+/// Whether a raw content line is a PHOTO property.
+pub fn is_photo_line(raw: &str) -> bool {
+    parse_line(raw).is_some_and(|l| l.name == "PHOTO")
+}
+
+/// The raw PHOTO lines of the first card in `text`.
+pub fn photo_lines(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for raw in unfold(text) {
+        let Some(line) = parse_line(&raw) else {
+            continue;
+        };
+        match (
+            line.name.as_str(),
+            line.value.trim().eq_ignore_ascii_case("VCARD"),
+        ) {
+            ("BEGIN", true) => inside = true,
+            ("END", true) if inside => break,
+            ("PHOTO", _) if inside => out.push(line.raw),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Parse every `BEGIN:VCARD ... END:VCARD` in `text`. Cards without a
-/// name and without a number are skipped.
+/// name and without a number are skipped, and so are contact groups
+/// (Apple's `X-ADDRESSBOOKSERVER-KIND:group`, vCard 4's `KIND:group`).
 pub fn parse(text: &str) -> Vec<Contact> {
     let mut cards = Vec::new();
     let mut current: Option<Vec<Line>> = None;
-    for raw in unfold(text) {
+    for raw in unfold(text.trim_start_matches('\u{feff}')) {
         let Some(line) = parse_line(&raw) else {
             continue;
         };
@@ -261,10 +339,79 @@ pub fn parse(text: &str) -> Vec<Contact> {
     cards
 }
 
+/// Apple's built-in labels look like `_$!<Mobile>!$_`; the word inside.
+fn builtin_label(label: &str) -> Option<&str> {
+    label.strip_prefix("_$!<")?.strip_suffix(">!$_")
+}
+
+/// A label as people read it: Apple's built-in ones unwrapped.
+pub fn label_text(label: &str) -> String {
+    match builtin_label(label) {
+        Some("HomeFAX") => "Home fax".into(),
+        Some("WorkFAX") => "Work fax".into(),
+        Some("OtherFAX") => "Other fax".into(),
+        Some("HomePage") => "Home page".into(),
+        Some(inner) => inner.to_string(),
+        None => label.to_string(),
+    }
+}
+
+/// The kind an Apple built-in label names, when it names one exactly.
+fn label_kind(label: &str) -> Option<PhoneKind> {
+    Some(match builtin_label(label)? {
+        "Mobile" => PhoneKind::Mobile,
+        "Home" => PhoneKind::Home,
+        "Work" => PhoneKind::Work,
+        "Main" => PhoneKind::Main,
+        "Other" => PhoneKind::Other,
+        _ => return None,
+    })
+}
+
+fn group_key(line: &Line) -> Option<String> {
+    line.group.as_ref().map(|g| g.to_ascii_lowercase())
+}
+
 fn from_lines(lines: Vec<Line>) -> Option<Contact> {
+    // Labels by group, and the groups whose label belongs to a TEL or an
+    // EMAIL (those labels are parsed, the others kept as lines).
+    let mut labels: HashMap<String, String> = HashMap::new();
+    let mut labeled: HashSet<String> = HashSet::new();
+    for line in &lines {
+        if let Some(g) = group_key(line) {
+            match line.name.as_str() {
+                "X-ABLABEL" => {
+                    labels.insert(g, unescape(&line.value).trim().to_string());
+                }
+                "TEL" | "EMAIL" => {
+                    labeled.insert(g);
+                }
+                _ => {}
+            }
+        }
+        if matches!(line.name.as_str(), "X-ADDRESSBOOKSERVER-KIND" | "KIND")
+            && line.value.trim().eq_ignore_ascii_case("group")
+        {
+            return None;
+        }
+    }
+    let label_of = |line: &Line| {
+        group_key(line)
+            .and_then(|g| labels.get(&g).cloned())
+            .unwrap_or_default()
+    };
     let mut c = Contact::default();
     let mut n_value: Option<Vec<String>> = None;
+    let mut org = String::new();
     for line in lines {
+        if line.name == "ORG" && org.is_empty() {
+            org = components(&line.value)
+                .into_iter()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+        }
         match line.name.as_str() {
             "VERSION" | "PRODID" | "REV" => {}
             "UID" => c.uid = line.value.trim().to_string(),
@@ -282,9 +429,25 @@ fn from_lines(lines: Vec<Line>) -> Option<Contact> {
                     .to_string();
                 if !number.is_empty() {
                     let types = line.types();
+                    let mut label = label_of(&line);
+                    let mut kind = phone_kind(&types);
+                    if let Some(k) = label_kind(&label) {
+                        // Apple's `item1.TEL;type=pref` with a built-in
+                        // label: the label is the kind.
+                        let plain: Vec<String> = types
+                            .iter()
+                            .filter(|t| !matches!(t.as_str(), "PREF" | "VOICE"))
+                            .cloned()
+                            .collect();
+                        if plain.is_empty() || kind == k {
+                            kind = k;
+                            label.clear();
+                        }
+                    }
                     c.phones.push(Phone {
                         number,
-                        kind: phone_kind(&types),
+                        kind,
+                        label,
                     });
                 }
             }
@@ -301,9 +464,11 @@ fn from_lines(lines: Vec<Line>) -> Option<Contact> {
                         } else {
                             String::new()
                         },
+                        label: label_of(&line),
                     });
                 }
             }
+            "X-ABLABEL" if group_key(&line).is_some_and(|g| labeled.contains(&g)) => {}
             "NOTE" => {
                 if !c.note.is_empty() {
                     c.note.push('\n');
@@ -315,6 +480,10 @@ fn from_lines(lines: Vec<Line>) -> Option<Contact> {
                 if matches!(line.value.trim(), "1" | "TRUE" | "true" | "yes") {
                     c.categories.push(crate::STARRED.into());
                 }
+            }
+            "PHOTO" => {
+                c.has_photo = true;
+                c.extra.push(line.raw);
             }
             _ => c.extra.push(line.raw),
         }
@@ -330,6 +499,10 @@ fn from_lines(lines: Vec<Line>) -> Option<Contact> {
                 .collect::<Vec<_>>()
                 .join(" ");
         }
+    }
+    if c.name.is_empty() {
+        // A company's card (Apple's X-ABShowAs:COMPANY) has only ORG.
+        c.name = org;
     }
     if c.name.is_empty() {
         c.name = c
@@ -361,6 +534,21 @@ fn fold(line: &str, out: &mut String) {
 
 /// Write a contact as vCard 3.0.
 pub fn write(c: &Contact) -> String {
+    // Labeled numbers and addresses get groups no kept line uses.
+    let used: HashSet<String> = c
+        .extra
+        .iter()
+        .filter_map(|l| parse_line(l))
+        .filter_map(|l| group_key(&l))
+        .collect();
+    let mut next = 0;
+    let mut new_group = move || loop {
+        next += 1;
+        let g = format!("item{next}");
+        if !used.contains(&g) {
+            return g;
+        }
+    };
     let mut out = String::new();
     let mut put = |l: String| fold(&l, &mut out);
     put("BEGIN:VCARD".into());
@@ -386,19 +574,26 @@ pub fn write(c: &Contact) -> String {
             PhoneKind::Fax => "FAX",
             PhoneKind::Other => "VOICE",
         };
-        put(format!(
-            "TEL;TYPE={ty}:{}",
-            p.number.replace(['\r', '\n'], "")
-        ));
+        let number = p.number.replace(['\r', '\n'], "");
+        if p.label.is_empty() {
+            put(format!("TEL;TYPE={ty}:{number}"));
+        } else {
+            let g = new_group();
+            put(format!("{g}.TEL;TYPE={ty}:{number}"));
+            put(format!("{g}.X-ABLabel:{}", escape(&p.label)));
+        }
     }
     for e in &c.emails {
-        match e.kind.as_str() {
-            "" => put(format!("EMAIL;TYPE=INTERNET:{}", escape(&e.address))),
-            k => put(format!(
-                "EMAIL;TYPE=INTERNET,{}:{}",
-                k.to_ascii_uppercase(),
-                escape(&e.address)
-            )),
+        let head = match e.kind.as_str() {
+            "" => "EMAIL;TYPE=INTERNET".to_string(),
+            k => format!("EMAIL;TYPE=INTERNET,{}", k.to_ascii_uppercase()),
+        };
+        if e.label.is_empty() {
+            put(format!("{head}:{}", escape(&e.address)));
+        } else {
+            let g = new_group();
+            put(format!("{g}.{head}:{}", escape(&e.address)));
+            put(format!("{g}.X-ABLabel:{}", escape(&e.label)));
         }
     }
     if !c.note.is_empty() {
@@ -490,5 +685,50 @@ NOTE:line one\\nline two\\, with comma\r\nCATEGORIES:Friends,Starred\r\nX-CUSTOM
     fn escape_roundtrip() {
         let s = "a,b;c\\d\ne";
         assert_eq!(unescape(&escape(s)), s);
+    }
+
+    #[test]
+    fn labels_by_group_round_trip() {
+        let text = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:L\r\nitem1.TEL;type=pref:202-555-0120\r\n\
+item1.X-ABLabel:_$!<Mobile>!$_\r\nitem2.TEL:202-555-0121\r\nitem2.X-ABLabel:Boat\r\n\
+item3.EMAIL;type=INTERNET:l@example.com\r\nitem3.X-ABLabel:School\r\n\
+item2.URL:https\\://example.org\r\nitem4.X-ABLabel:orphan\r\nEND:VCARD\r\n";
+        let c = &parse(text)[0];
+        assert_eq!(c.phones[0].kind, PhoneKind::Mobile);
+        assert_eq!(c.phones[0].label, "");
+        assert_eq!(c.phones[1].label, "Boat");
+        assert_eq!(c.emails[0].label, "School");
+        // Lines of other properties keep their groups.
+        assert_eq!(
+            c.extra,
+            vec![
+                "item2.URL:https\\://example.org".to_string(),
+                "item4.X-ABLabel:orphan".to_string()
+            ]
+        );
+        let w = write(c);
+        // New groups avoid the kept lines' item2 and item4.
+        assert!(w.contains("item1.TEL;TYPE=VOICE:202-555-0121"));
+        assert!(w.contains("item1.X-ABLabel:Boat"));
+        assert!(w.contains("item3.EMAIL;TYPE=INTERNET:l@example.com\r\nitem3.X-ABLabel:School"));
+        let again = &parse(&w)[0];
+        assert_eq!(again.phones, c.phones);
+        assert_eq!(again.emails, c.emails);
+        assert_eq!(again.extra, c.extra);
+    }
+
+    #[test]
+    fn bom_utf16_groups_and_company_cards() {
+        let text = "\u{feff}BEGIN:VCARD\nVERSION:3.0\nFN:Team\nKIND:group\nEND:VCARD\n\
+BEGIN:VCARD\nVERSION:3.0\nN:;;;;\nFN:\nORG:Example Hardware;\nEND:VCARD\n";
+        assert_eq!(count_cards(text), 2);
+        let cards = parse(text);
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].name, "Example Hardware");
+        let mut utf16 = vec![0xFF, 0xFE];
+        for u in "BEGIN:VCARD\nFN:Zoë\nEND:VCARD\n".encode_utf16() {
+            utf16.extend(u.to_le_bytes());
+        }
+        assert_eq!(parse(&text_from_bytes(&utf16))[0].name, "Zoë");
     }
 }

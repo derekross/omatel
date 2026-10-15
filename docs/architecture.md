@@ -47,6 +47,22 @@ use the crates as git dependencies pinned to an omatel release tag.
   server; omatel itself has no sync code (§6 of the plan, option A).
   Edits keep every vCard line they don't change, so a synced card loses
   nothing.
+  - The book remembers each file's modification time, size and inode, and
+    reloads only the files that were added, changed (in place or
+    replaced) or removed. The apps watch `AddressBook::watch_dirs()` (the
+    root and every book) and refresh that list after each change, so a
+    book created later is watched too.
+  - A save checks the file's stamp first: when the card changed on disk
+    since it was read, it returns `Error::Conflict` and writes nothing.
+  - Photos stay in the files. A contact carries `has_photo`, and
+    `AddressBook::photo()` reads the picture when it is shown; saving puts
+    the file's PHOTO back.
+  - Import merges: a card joins the contact with its UID, or else the one
+    with the same name (case and spacing ignored) and a shared number (an
+    email, for cards without numbers). Numbers, emails, categories and
+    other lines are united. Google's and Apple's labels (`item1.TEL` with
+    `item1.X-ABLabel`) become `Phone::label` and `Email::label` and are
+    written back as groups.
 
 ## Crates
 

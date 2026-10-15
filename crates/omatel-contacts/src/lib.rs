@@ -11,7 +11,7 @@
 pub mod number;
 pub mod vcard;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -20,13 +20,14 @@ use std::time::SystemTime;
 /// The category that marks a favorite (starred) contact.
 pub const STARRED: &str = "Starred";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum PhoneKind {
     Mobile,
     Home,
     Work,
     Main,
     Fax,
+    #[default]
     Other,
 }
 
@@ -52,17 +53,64 @@ impl PhoneKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Phone {
     pub number: String,
     pub kind: PhoneKind,
+    /// A custom label (Google's and Apple's `X-ABLabel`), shown instead of
+    /// the kind when set; empty otherwise.
+    pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl Phone {
+    /// The label to show: the custom one, or the kind's.
+    pub fn label_text(&self) -> String {
+        if self.label.is_empty() {
+            self.kind.label().to_string()
+        } else {
+            vcard::label_text(&self.label)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Email {
     pub address: String,
     /// "home", "work" or empty.
     pub kind: String,
+    /// A custom label (`X-ABLabel`), empty when there is none.
+    pub label: String,
+}
+
+/// A contact file as it was read: its modification time, size and inode.
+/// A sync tool or an editor that rewrites the file changes at least one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileStamp {
+    modified: Option<SystemTime>,
+    size: u64,
+    inode: u64,
+}
+
+impl FileStamp {
+    fn from_metadata(m: &fs::Metadata) -> FileStamp {
+        #[cfg(unix)]
+        let inode = std::os::unix::fs::MetadataExt::ino(m);
+        #[cfg(not(unix))]
+        let inode = 0;
+        FileStamp {
+            modified: m.modified().ok(),
+            size: m.len(),
+            inode,
+        }
+    }
+
+    /// The file's stamp now; None when it is gone.
+    pub fn of(path: &Path) -> Option<FileStamp> {
+        fs::metadata(path)
+            .ok()
+            .filter(|m| m.is_file())
+            .map(|m| FileStamp::from_metadata(&m))
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -73,13 +121,21 @@ pub struct Contact {
     pub emails: Vec<Email>,
     pub note: String,
     pub categories: Vec<String>,
-    /// Lines we don't edit (PHOTO, ADR, ORG, X-...), written back as read.
+    /// Lines we don't edit (ADR, ORG, X-...), written back as read. A
+    /// contact from the address book carries no PHOTO line here (see
+    /// `has_photo`); one parsed with [`vcard::parse`] does.
     pub extra: Vec<String>,
+    /// Whether the card has a PHOTO. The book keeps the photo in the file
+    /// and writes it back on save; [`AddressBook::photo`] reads it.
+    pub has_photo: bool,
     /// The N value as read; rewritten from the name once that changes.
     pub n_raw: Option<String>,
     pub name_changed: bool,
     /// The file the contact came from (None for a new contact).
     pub path: Option<PathBuf>,
+    /// The file's stamp when it was read; a save refuses to overwrite a
+    /// file whose stamp has changed since.
+    pub stamp: Option<FileStamp>,
 }
 
 impl Contact {
@@ -135,14 +191,13 @@ impl Contact {
         }
     }
 
-    /// The contact's photo as bytes, when the card carries one inline
-    /// (`PHOTO;ENCODING=b:` or a `data:` URI).
+    /// The contact's photo as bytes, when `extra` carries one inline
+    /// (`PHOTO;ENCODING=b:` or a `data:` URI). Contacts from the address
+    /// book don't: use [`AddressBook::photo`] for those.
     pub fn photo_bytes(&self) -> Option<Vec<u8>> {
-        let line = self
-            .extra
-            .iter()
-            .find(|l| l.to_ascii_uppercase().starts_with("PHOTO"))?;
-        let (_, value) = line.split_once(':')?;
+        let line = self.extra.iter().find(|l| vcard::is_photo_line(l))?;
+        let line = vcard::parse_line(line)?;
+        let value = line.value.as_str();
         let b64 = if let Some(rest) = value.strip_prefix("data:") {
             rest.split_once("base64,")?.1
         } else {
@@ -203,6 +258,23 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("no such contact")]
     NotFound,
+    /// The contact's file changed on disk after it was read (a sync tool,
+    /// another app or an editor); nothing was written.
+    #[error("the contact changed elsewhere")]
+    Conflict,
+}
+
+/// What an import did, card by card.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ImportReport {
+    /// New contacts.
+    pub added: usize,
+    /// Cards that added numbers, emails or other details to a contact
+    /// already there (the same UID, or the same name and a shared number).
+    pub merged: usize,
+    /// Cards with nothing new, and cards that aren't contacts (no name and
+    /// no number, contact groups).
+    pub skipped: usize,
 }
 
 /// A contact found for a number, for call logs and conversations.
@@ -229,7 +301,10 @@ pub struct AddressBook {
     contacts: Vec<Contact>,
     /// tail_key (last 7 digits) -> indices into contacts.
     by_tail: HashMap<String, Vec<usize>>,
-    stamp: Vec<(PathBuf, Option<SystemTime>)>,
+    /// UID -> index into contacts (the first card with that UID).
+    by_uid: HashMap<String, usize>,
+    /// Every contact file as last read.
+    files: HashMap<PathBuf, FileStamp>,
 }
 
 /// `$XDG_DATA_HOME/contacts`, or `~/.local/share/contacts`.
@@ -241,6 +316,203 @@ pub fn default_root() -> PathBuf {
     Path::new(&home).join(".local/share/contacts")
 }
 
+fn hidden(p: &Path) -> bool {
+    p.file_name()
+        .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+}
+
+/// A contact file: `*.vcf`, not hidden (our temporary files are hidden).
+fn is_card_file(p: &Path) -> bool {
+    !hidden(p) && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("vcf"))
+}
+
+/// Read one contact file, without its photo.
+fn load_file(path: &Path) -> Option<Contact> {
+    use std::io::Read;
+    let read = || -> std::io::Result<(Vec<u8>, FileStamp)> {
+        let mut f = fs::File::open(path)?;
+        // The stamp of the file we read, not of whatever replaces it.
+        let stamp = FileStamp::from_metadata(&f.metadata()?);
+        let mut bytes = Vec::new();
+        f.read_to_end(&mut bytes)?;
+        Ok((bytes, stamp))
+    };
+    let (bytes, stamp) = match read() {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "unreadable contact file");
+            return None;
+        }
+    };
+    // One card per file in a vdir; take the first.
+    let mut c = vcard::parse(&vcard::text_from_bytes(&bytes))
+        .into_iter()
+        .next()?;
+    if c.uid.is_empty() {
+        c.uid = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+    }
+    c.extra.retain(|l| !vcard::is_photo_line(l));
+    c.path = Some(path.to_path_buf());
+    c.stamp = Some(stamp);
+    Some(c)
+}
+
+/// A name compared for merging: case and spacing ignored.
+fn name_key(name: &str) -> String {
+    name.split_whitespace()
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Properties a card has at most one of: a merge keeps the existing one.
+const SINGLE: &[&str] = &[
+    "BDAY",
+    "ANNIVERSARY",
+    "ORG",
+    "TITLE",
+    "ROLE",
+    "NICKNAME",
+    "PHOTO",
+    "LOGO",
+    "GENDER",
+    "KIND",
+    "SORT-STRING",
+    "X-ABSHOWAS",
+    "X-ABUID",
+    "X-PHONETIC-FIRST-NAME",
+    "X-PHONETIC-LAST-NAME",
+];
+
+/// Merge `card` into `into`: union the numbers, emails, categories and
+/// kept lines, fill an empty name, and append a new note. True if `into`
+/// gained anything.
+fn merge_card(into: &mut Contact, card: Contact, region: &str) -> bool {
+    let mut changed = false;
+    if into.name.is_empty() && !card.name.is_empty() {
+        into.name = card.name;
+        into.n_raw = card.n_raw;
+        into.name_changed = into.n_raw.is_none();
+        changed = true;
+    }
+    for p in card.phones {
+        match into
+            .phones
+            .iter_mut()
+            .find(|q| number::same_number(&q.number, &p.number, region))
+        {
+            Some(q) => {
+                if q.kind == PhoneKind::Other && p.kind != PhoneKind::Other {
+                    q.kind = p.kind;
+                    changed = true;
+                }
+                if q.label.is_empty() && !p.label.is_empty() {
+                    q.label = p.label;
+                    changed = true;
+                }
+            }
+            None => {
+                into.phones.push(p);
+                changed = true;
+            }
+        }
+    }
+    for e in card.emails {
+        if !into
+            .emails
+            .iter()
+            .any(|x| x.address.eq_ignore_ascii_case(&e.address))
+        {
+            into.emails.push(e);
+            changed = true;
+        }
+    }
+    let note = card.note.trim();
+    if !note.is_empty() && !into.note.contains(note) {
+        if !into.note.is_empty() {
+            into.note.push('\n');
+        }
+        into.note.push_str(note);
+        changed = true;
+    }
+    for cat in card.categories {
+        if !into.categories.iter().any(|x| x.eq_ignore_ascii_case(&cat)) {
+            into.categories.push(cat);
+            changed = true;
+        }
+    }
+    changed |= merge_extra(into, card.extra);
+    changed
+}
+
+/// The kept lines of a merged card, grouped ones (`item3.ADR` with its
+/// `item3.X-ABLabel`) as one unit under a group name `into` doesn't use.
+fn merge_extra(into: &mut Contact, extra: Vec<String>) -> bool {
+    let parsed: Vec<vcard::Line> = into
+        .extra
+        .iter()
+        .filter_map(|l| vcard::parse_line(l))
+        .collect();
+    let mut used: HashSet<String> = parsed
+        .iter()
+        .filter_map(|l| l.group.as_ref().map(|g| g.to_ascii_lowercase()))
+        .collect();
+    let has_name = |n: &str| parsed.iter().any(|l| l.name == n);
+    let has_value = |l: &vcard::Line| {
+        parsed
+            .iter()
+            .any(|x| x.name == l.name && x.value == l.value)
+    };
+    // Units in order: (group, lines).
+    let mut units: Vec<(Option<String>, Vec<vcard::Line>)> = Vec::new();
+    for line in extra.iter().filter_map(|l| vcard::parse_line(l)) {
+        let g = line.group.as_ref().map(|g| g.to_ascii_lowercase());
+        match units.iter_mut().find(|(ug, _)| g.is_some() && *ug == g) {
+            Some((_, lines)) => lines.push(line),
+            None => units.push((g, vec![line])),
+        }
+    }
+    let mut changed = false;
+    let mut next = 0;
+    for (group, lines) in units {
+        // A unit is new when one of its lines (labels aside) is.
+        let fresh = lines.iter().filter(|l| l.name != "X-ABLABEL").any(|l| {
+            if l.name == "PHOTO" {
+                !into.has_photo
+            } else if SINGLE.contains(&l.name.as_str()) {
+                !has_name(&l.name)
+            } else {
+                !has_value(l)
+            }
+        });
+        if !fresh {
+            continue;
+        }
+        let new_group = group.map(|_| loop {
+            next += 1;
+            let g = format!("item{next}");
+            if used.insert(g.clone()) {
+                break g;
+            }
+        });
+        for l in lines {
+            if l.name == "PHOTO" {
+                into.has_photo = true;
+            }
+            let raw = match (&new_group, &l.group) {
+                (Some(g), Some(old)) => format!("{g}{}", &l.raw[old.len()..]),
+                _ => l.raw,
+            };
+            into.extra.push(raw);
+        }
+        changed = true;
+    }
+    changed
+}
+
 impl AddressBook {
     /// Open the books under `root` (created on the first save).
     pub fn open(root: impl Into<PathBuf>, region: &str) -> AddressBook {
@@ -250,7 +522,8 @@ impl AddressBook {
             region: region.to_string(),
             contacts: Vec::new(),
             by_tail: HashMap::new(),
-            stamp: Vec::new(),
+            by_uid: HashMap::new(),
+            files: HashMap::new(),
         };
         b.reload();
         b
@@ -274,76 +547,107 @@ impl AddressBook {
             .flatten()
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.is_dir())
+            .filter(|p| p.is_dir() && !hidden(p))
             .collect();
         dirs.sort();
         dirs
     }
 
-    fn current_stamp(&self) -> Vec<(PathBuf, Option<SystemTime>)> {
-        let mut stamp = vec![(
-            self.root.clone(),
-            fs::metadata(&self.root).and_then(|m| m.modified()).ok(),
-        )];
-        for d in self.book_dirs() {
-            let m = fs::metadata(&d).and_then(|m| m.modified()).ok();
-            stamp.push((d, m));
-        }
-        stamp
+    /// The directories to watch for changes: the root (for books created
+    /// or removed) and every book in it. An app watches these, and after
+    /// a change calls [`AddressBook::reload_if_changed`] and this again,
+    /// so a book created after it started is watched too.
+    pub fn watch_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = vec![self.root.clone()];
+        dirs.extend(self.book_dirs());
+        dirs
     }
 
-    /// Read every book again.
-    pub fn reload(&mut self) {
-        let mut contacts = Vec::new();
+    /// Every contact file now, with its stamp.
+    fn scan(&self) -> HashMap<PathBuf, FileStamp> {
+        let mut out = HashMap::new();
         for dir in self.book_dirs() {
-            let mut files: Vec<PathBuf> = fs::read_dir(&dir)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("vcf")))
-                .collect();
-            files.sort();
-            for f in files {
-                match fs::read_to_string(&f) {
-                    Ok(text) => {
-                        // One card per file in a vdir; take the first.
-                        if let Some(mut c) = vcard::parse(&text).into_iter().next() {
-                            if c.uid.is_empty() {
-                                c.uid = f
-                                    .file_stem()
-                                    .map(|s| s.to_string_lossy().into_owned())
-                                    .unwrap_or_default();
-                            }
-                            c.path = Some(f);
-                            contacts.push(c);
-                        }
-                    }
-                    Err(e) => tracing::warn!(error = %e, "unreadable contact file"),
+            for e in fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if !is_card_file(&p) {
+                    continue;
+                }
+                if let Some(s) = FileStamp::of(&p) {
+                    out.insert(p, s);
                 }
             }
         }
-        contacts.sort_by_key(|c| c.display_name().to_lowercase());
-        self.contacts = contacts;
-        self.index();
-        self.stamp = self.current_stamp();
-        tracing::debug!(contacts = self.contacts.len(), "address book loaded");
+        out
     }
 
-    /// Reload when a book directory changed (a file added, removed or
-    /// renamed, as sync tools and our own saves do). True if it did.
+    /// Read every book again from scratch.
+    pub fn reload(&mut self) {
+        self.contacts.clear();
+        self.files.clear();
+        self.reload_if_changed();
+    }
+
+    /// Reparse the contact files that were added, changed (in place or
+    /// replaced) or removed since they were read; the others stay as they
+    /// are. True if anything changed.
     pub fn reload_if_changed(&mut self) -> bool {
-        if self.current_stamp() != self.stamp {
-            self.reload();
-            true
-        } else {
-            false
+        let now = self.scan();
+        if now == self.files {
+            return false;
         }
+        let stale: HashSet<&PathBuf> = self
+            .files
+            .iter()
+            .filter(|(p, s)| now.get(*p) != Some(*s))
+            .map(|(p, _)| p)
+            .collect();
+        let keep: Vec<Contact> = std::mem::take(&mut self.contacts)
+            .into_iter()
+            .filter(|c| {
+                c.path
+                    .as_ref()
+                    .is_some_and(|p| !stale.contains(p) && now.contains_key(p))
+            })
+            .collect();
+        let have: HashSet<PathBuf> = keep.iter().filter_map(|c| c.path.clone()).collect();
+        let mut contacts = keep;
+        let mut files = HashMap::with_capacity(now.len());
+        let mut reread = 0;
+        for (p, s) in now {
+            if have.contains(&p) {
+                files.insert(p, s);
+                continue;
+            }
+            reread += 1;
+            match load_file(&p) {
+                Some(c) => {
+                    files.insert(p, c.stamp.unwrap_or(s));
+                    contacts.push(c);
+                }
+                // Not a contact (yet): remember it so it isn't read again
+                // until it changes.
+                None => {
+                    files.insert(p, s);
+                }
+            }
+        }
+        contacts.sort_by_cached_key(|c| (c.display_name().to_lowercase(), c.path.clone()));
+        self.contacts = contacts;
+        self.files = files;
+        self.index();
+        tracing::debug!(
+            contacts = self.contacts.len(),
+            reread,
+            "address book loaded"
+        );
+        true
     }
 
     fn index(&mut self) {
         self.by_tail.clear();
+        self.by_uid.clear();
         for (i, c) in self.contacts.iter().enumerate() {
+            self.by_uid.entry(c.uid.clone()).or_insert(i);
             for p in &c.phones {
                 let key = number::tail_key(&p.number);
                 if !key.is_empty() {
@@ -358,7 +662,20 @@ impl AddressBook {
     }
 
     pub fn get(&self, uid: &str) -> Option<&Contact> {
-        self.contacts.iter().find(|c| c.uid == uid)
+        self.by_uid.get(uid).map(|&i| &self.contacts[i])
+    }
+
+    /// A contact's photo, read from its file (None when it has none, or
+    /// only a link to one).
+    pub fn photo(&self, uid: &str) -> Option<Vec<u8>> {
+        let c = self.get(uid).filter(|c| c.has_photo)?;
+        let bytes = fs::read(c.path.as_ref()?).ok()?;
+        let text = vcard::text_from_bytes(&bytes);
+        let card = Contact {
+            extra: vcard::photo_lines(&text),
+            ..Contact::default()
+        };
+        card.photo_bytes()
     }
 
     pub fn starred(&self) -> Vec<&Contact> {
@@ -369,10 +686,17 @@ impl AddressBook {
     pub fn lookup(&self, raw: &str) -> Option<Match> {
         let key = number::tail_key(raw);
         let candidates = self.by_tail.get(&key)?;
+        // Parsed once: the candidates share the last digits, and parsing
+        // is the costly part.
+        let want = number::to_e164(raw, &self.region);
         for &i in candidates {
             let c = &self.contacts[i];
             for p in &c.phones {
-                if number::same_number(&p.number, raw, &self.region) {
+                let same = match (&want, number::to_e164(&p.number, &self.region)) {
+                    (Some(a), Some(b)) => *a == b,
+                    _ => number::same_number(&p.number, raw, &self.region),
+                };
+                if same {
                     return Some(Match {
                         uid: c.uid.clone(),
                         name: c.display_name(),
@@ -447,24 +771,27 @@ impl AddressBook {
             .collect()
     }
 
-    /// Save a contact (new or edited) to its file, atomically.
+    /// Save a contact (new or edited) to its file, atomically. An edited
+    /// contact whose file changed on disk since it was read is not
+    /// written: [`Error::Conflict`]. Reload and edit it again.
     pub fn save(&mut self, contact: &Contact) -> Result<(), Error> {
         let mut c = contact.clone();
         if c.uid.is_empty() {
             c.uid = new_uid();
         }
         let path = match &c.path {
-            Some(p) => p.clone(),
+            Some(p) => {
+                check_unchanged(&c, p)?;
+                p.clone()
+            }
             None => {
                 let dir = self.root.join(&self.default_book);
                 fs::create_dir_all(&dir)?;
                 dir.join(format!("{}.vcf", file_safe(&c.uid)))
             }
         };
-        write_atomic(&path, vcard::write(&c).as_bytes())?;
-        c.path = Some(path);
-        c.name_changed = false;
-        self.reload();
+        write_card(&c, &path)?;
+        self.reload_if_changed();
         Ok(())
     }
 
@@ -473,40 +800,181 @@ impl AddressBook {
         if let Some(p) = &c.path {
             fs::remove_file(p)?;
         }
-        self.reload();
+        self.reload_if_changed();
         Ok(())
     }
 
-    /// Import every card in a `.vcf` (one or many contacts, as Android's
-    /// export writes them). Cards whose UID is already present replace
-    /// nothing and are skipped. Returns how many were added.
-    pub fn import(&mut self, text: &str) -> Result<usize, Error> {
+    /// Import every card in a `.vcf` (one or many contacts, as Android,
+    /// Google Contacts and Apple's Contacts export them). A card merges
+    /// into the contact with its UID or, failing that, the contact with
+    /// the same name and at least one of its numbers (a card without
+    /// numbers: one of its emails), also one added earlier in the same
+    /// file. Numbers, emails and details are united; nothing is dropped.
+    /// Other cards become new contacts in the default book, with a UID
+    /// generated when they have none.
+    pub fn import(&mut self, text: &str) -> Result<ImportReport, Error> {
+        self.reload_if_changed();
+        let total = vcard::count_cards(text);
         let cards = vcard::parse(text);
-        let dir = self.root.join(&self.default_book);
-        fs::create_dir_all(&dir)?;
-        let mut added = 0;
-        for mut c in cards {
-            if !c.uid.is_empty() && self.get(&c.uid).is_some() {
-                continue;
-            }
-            if c.uid.is_empty() {
-                c.uid = new_uid();
-            }
-            let path = dir.join(format!("{}.vcf", file_safe(&c.uid)));
-            if path.exists() {
-                continue;
-            }
-            write_atomic(&path, vcard::write(&c).as_bytes())?;
-            added += 1;
+        let mut report = ImportReport {
+            skipped: total.saturating_sub(cards.len()),
+            ..ImportReport::default()
+        };
+        // The contacts this import adds or changes, written at the end.
+        struct Work {
+            contact: Contact,
+            fresh: bool,
+            changed: bool,
         }
-        self.reload();
-        Ok(added)
+        let mut work: Vec<Work> = Vec::new();
+        let mut work_uid: HashMap<String, usize> = HashMap::new();
+        let mut work_name: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut pulled: HashMap<usize, usize> = HashMap::new();
+        let mut book_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, c) in self.contacts.iter().enumerate() {
+            book_name.entry(name_key(&c.name)).or_default().push(i);
+        }
+        let region = self.region.clone();
+        // A shared number, or for cards without one a shared email.
+        let shares_number = |a: &Contact, b: &Contact| {
+            a.phones.iter().any(|p| {
+                b.phones
+                    .iter()
+                    .any(|q| number::same_number(&p.number, &q.number, &region))
+            }) || (b.phones.is_empty()
+                && a.emails.iter().any(|e| {
+                    b.emails
+                        .iter()
+                        .any(|f| e.address.eq_ignore_ascii_case(&f.address))
+                }))
+        };
+        for card in cards {
+            let key = name_key(&card.name);
+            let mut target: Option<usize> = None;
+            let mut from_book: Option<usize> = None;
+            if !card.uid.is_empty() {
+                target = work_uid.get(&card.uid).copied();
+                if target.is_none() {
+                    from_book = self.by_uid.get(&card.uid).copied();
+                }
+            }
+            if target.is_none() && from_book.is_none() {
+                target = work_name.get(&key).and_then(|ws| {
+                    ws.iter()
+                        .copied()
+                        .find(|&w| shares_number(&work[w].contact, &card))
+                });
+                if target.is_none() {
+                    from_book = book_name.get(&key).and_then(|bs| {
+                        bs.iter()
+                            .copied()
+                            .find(|&b| shares_number(&self.contacts[b], &card))
+                    });
+                }
+            }
+            if let Some(b) = from_book {
+                target = Some(*pulled.entry(b).or_insert_with(|| {
+                    let c = self.contacts[b].clone();
+                    work_uid.insert(c.uid.clone(), work.len());
+                    work_name
+                        .entry(name_key(&c.name))
+                        .or_default()
+                        .push(work.len());
+                    work.push(Work {
+                        contact: c,
+                        fresh: false,
+                        changed: false,
+                    });
+                    work.len() - 1
+                }));
+            }
+            match target {
+                Some(w) => {
+                    if merge_card(&mut work[w].contact, card, &self.region) {
+                        work[w].changed = true;
+                        report.merged += 1;
+                    } else {
+                        report.skipped += 1;
+                    }
+                }
+                None => {
+                    let mut c = card;
+                    if c.uid.is_empty() {
+                        c.uid = new_uid();
+                    }
+                    work_uid.insert(c.uid.clone(), work.len());
+                    work_name.entry(key).or_default().push(work.len());
+                    work.push(Work {
+                        contact: c,
+                        fresh: true,
+                        changed: true,
+                    });
+                    report.added += 1;
+                }
+            }
+        }
+        let dir = self.root.join(&self.default_book);
+        for w in work.iter_mut().filter(|w| w.changed) {
+            let c = &mut w.contact;
+            let path = match (&c.path, w.fresh) {
+                (Some(p), false) => {
+                    check_unchanged(c, p)?;
+                    p.clone()
+                }
+                _ => {
+                    fs::create_dir_all(&dir)?;
+                    let mut path = dir.join(format!("{}.vcf", file_safe(&c.uid)));
+                    while path.exists() {
+                        c.uid = new_uid();
+                        path = dir.join(format!("{}.vcf", file_safe(&c.uid)));
+                    }
+                    path
+                }
+            };
+            write_card(c, &path)?;
+        }
+        self.reload_if_changed();
+        tracing::info!(
+            added = report.added,
+            merged = report.merged,
+            skipped = report.skipped,
+            "contacts imported"
+        );
+        Ok(report)
     }
 
-    /// All contacts as one `.vcf`.
+    /// All contacts as one `.vcf`, photos included.
     pub fn export(&self) -> String {
-        self.contacts.iter().map(vcard::write).collect()
+        self.contacts.iter().map(card_text).collect()
     }
+}
+
+/// Fail with [`Error::Conflict`] when the contact's file changed on disk
+/// since the contact was read.
+fn check_unchanged(c: &Contact, path: &Path) -> Result<(), Error> {
+    match c.stamp {
+        Some(s) if FileStamp::of(path) != Some(s) => Err(Error::Conflict),
+        _ => Ok(()),
+    }
+}
+
+/// The card as written: a photo the contact keeps in its file goes back in.
+fn card_text(c: &Contact) -> String {
+    if c.has_photo && !c.extra.iter().any(|l| vcard::is_photo_line(l)) {
+        if let Some(bytes) = c.path.as_ref().and_then(|p| fs::read(p).ok()) {
+            let mut full = c.clone();
+            full.extra
+                .extend(vcard::photo_lines(&vcard::text_from_bytes(&bytes)));
+            return vcard::write(&full);
+        }
+    }
+    vcard::write(c)
+}
+
+fn write_card(c: &Contact, path: &Path) -> Result<(), Error> {
+    let text = card_text(c);
+    write_atomic(path, text.as_bytes())?;
+    Ok(())
 }
 
 fn file_safe(uid: &str) -> String {
@@ -555,6 +1023,7 @@ mod tests {
             c.phones.push(Phone {
                 number: n.to_string(),
                 kind: PhoneKind::Mobile,
+                label: String::new(),
             });
         }
         c
@@ -605,10 +1074,13 @@ mod tests {
         let (_d, mut b) = book();
         let vcf = "BEGIN:VCARD\nVERSION:3.0\nUID:a\nFN:A Person\nTEL:202-555-0110\nEND:VCARD\n\
 BEGIN:VCARD\nVERSION:2.1\nN:Person;B;;;\nTEL;CELL:202-555-0111\nEND:VCARD\n";
-        assert_eq!(b.import(vcf).unwrap(), 2);
-        assert_eq!(b.import(vcf).unwrap(), 1); // the UID-less card again
-        assert_eq!(b.contacts().len(), 3);
-        assert!(b.export().matches("BEGIN:VCARD").count() == 3);
+        let r = b.import(vcf).unwrap();
+        assert_eq!((r.added, r.merged, r.skipped), (2, 0, 0));
+        // Again: the UID matches one, the name and number the other.
+        let r = b.import(vcf).unwrap();
+        assert_eq!((r.added, r.merged, r.skipped), (0, 0, 2));
+        assert_eq!(b.contacts().len(), 2);
+        assert!(b.export().matches("BEGIN:VCARD").count() == 2);
     }
 
     #[test]
@@ -655,5 +1127,149 @@ BEGIN:VCARD\nVERSION:2.1\nN:Person;B;;;\nTEL;CELL:202-555-0111\nEND:VCARD\n";
             "BEGIN:VCARD\nVERSION:4.0\nFN:P\nPHOTO:data:image/png;base64,aGVsbG8=\nEND:VCARD\n",
         )[0];
         assert_eq!(c.photo_bytes().unwrap(), b"hello");
+    }
+
+    fn write_card_file(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    /// Rewrite a file in place (same inode), as an editor might, and move
+    /// its time on so the change shows even on a coarse clock.
+    fn edit_in_place(path: &Path, text: &str) {
+        let before = fs::metadata(path).unwrap().modified().unwrap();
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .unwrap();
+        f.write_all(text.as_bytes()).unwrap();
+        f.set_modified(before + std::time::Duration::from_secs(2))
+            .unwrap();
+    }
+
+    #[test]
+    fn reload_if_changed_sees_in_place_edits_and_removals() {
+        let (d, mut b) = book();
+        let a = d.path().join("default/a.vcf");
+        let c = d.path().join("default/c.vcf");
+        write_card_file(
+            &a,
+            "BEGIN:VCARD\nVERSION:3.0\nUID:a\nFN:Ann One\nEND:VCARD\n",
+        );
+        write_card_file(
+            &c,
+            "BEGIN:VCARD\nVERSION:3.0\nUID:c\nFN:Cid One\nEND:VCARD\n",
+        );
+        assert!(b.reload_if_changed());
+        assert!(!b.reload_if_changed());
+        // Same size, same inode: only the time and the content differ.
+        edit_in_place(
+            &a,
+            "BEGIN:VCARD\nVERSION:3.0\nUID:a\nFN:Ann Two\nEND:VCARD\n",
+        );
+        assert!(b.reload_if_changed());
+        assert_eq!(b.get("a").unwrap().name, "Ann Two");
+        assert_eq!(b.get("c").unwrap().name, "Cid One");
+        fs::remove_file(&c).unwrap();
+        assert!(b.reload_if_changed());
+        assert!(b.get("c").is_none());
+        assert_eq!(b.contacts().len(), 1);
+    }
+
+    #[test]
+    fn watch_dirs_include_books_created_later() {
+        let (d, b) = book();
+        assert_eq!(b.watch_dirs(), vec![d.path().to_path_buf()]);
+        fs::create_dir_all(d.path().join("work")).unwrap();
+        assert_eq!(
+            b.watch_dirs(),
+            vec![d.path().to_path_buf(), d.path().join("work")]
+        );
+    }
+
+    #[test]
+    fn save_refuses_a_card_changed_on_disk() {
+        let (d, mut b) = book();
+        let a = d.path().join("default/a.vcf");
+        write_card_file(
+            &a,
+            "BEGIN:VCARD\nVERSION:3.0\nUID:a\nFN:Ann One\nEND:VCARD\n",
+        );
+        b.reload();
+        let mut mine = b.get("a").unwrap().clone();
+        edit_in_place(
+            &a,
+            "BEGIN:VCARD\nVERSION:3.0\nUID:a\nFN:Ann Syn\nEND:VCARD\n",
+        );
+        mine.set_name("Ann Mine");
+        assert!(matches!(b.save(&mine), Err(Error::Conflict)));
+        assert!(fs::read_to_string(&a).unwrap().contains("Ann Syn"));
+        // Reloaded, the edit goes through.
+        b.reload_if_changed();
+        let mut mine = b.get("a").unwrap().clone();
+        mine.set_name("Ann Mine");
+        b.save(&mine).unwrap();
+        assert_eq!(b.get("a").unwrap().name, "Ann Mine");
+        // A card removed meanwhile is a conflict too.
+        let mine = b.get("a").unwrap().clone();
+        fs::remove_file(&a).unwrap();
+        assert!(matches!(b.save(&mine), Err(Error::Conflict)));
+    }
+
+    #[test]
+    fn photos_stay_in_the_file() {
+        let (d, mut b) = book();
+        let a = d.path().join("default/a.vcf");
+        write_card_file(
+            &a,
+            "BEGIN:VCARD\nVERSION:3.0\nUID:a\nFN:Pat Photo\nPHOTO;ENCODING=b;TYPE=PNG:aGVs\n bG8=\nEND:VCARD\n",
+        );
+        b.reload();
+        let c = b.get("a").unwrap().clone();
+        assert!(c.has_photo);
+        assert!(c.extra.is_empty());
+        assert_eq!(b.photo("a").unwrap(), b"hello");
+        let mut c = c;
+        c.set_name("Pat Renamed");
+        b.save(&c).unwrap();
+        let text = fs::read_to_string(&a).unwrap();
+        assert!(text.contains("FN:Pat Renamed"));
+        assert!(text.contains("PHOTO;ENCODING=b;TYPE=PNG:aGVsbG8="));
+        assert_eq!(b.photo("a").unwrap(), b"hello");
+        assert!(b.export().contains("PHOTO;ENCODING=b"));
+    }
+
+    #[test]
+    fn import_merges_by_name_and_number_and_keeps_everything() {
+        let (_d, mut b) = book();
+        let mut known = contact("Robin Example", &["+1 202 555 0140"]);
+        known.note = "Known".into();
+        b.save(&known).unwrap();
+        let vcf = "BEGIN:VCARD\nVERSION:3.0\nFN:robin  example\nTEL;TYPE=CELL:(202) 555-0140\n\
+item1.TEL:202-555-0141\nitem1.X-ABLabel:Boat\nEMAIL;TYPE=INTERNET:robin@example.com\n\
+item2.ADR;TYPE=HOME:;;1 Example Way;Springfield;;;\nitem2.X-ABLabel:Cabin\nBDAY:2000-01-01\nEND:VCARD\n\
+BEGIN:VCARD\nVERSION:3.0\nFN:Robin Example\nTEL:+1 202 555 0199\nEND:VCARD\n";
+        let r = b.import(vcf).unwrap();
+        // The second card shares the name but no number: a new contact.
+        assert_eq!((r.added, r.merged, r.skipped), (1, 1, 0));
+        let merged = b
+            .contacts()
+            .iter()
+            .find(|c| c.uid == known.uid)
+            .unwrap()
+            .clone();
+        assert_eq!(merged.name, "Robin Example");
+        assert_eq!(merged.phones.len(), 2);
+        assert_eq!(merged.phones[1].label, "Boat");
+        assert_eq!(merged.phones[1].label_text(), "Boat");
+        assert_eq!(merged.emails[0].address, "robin@example.com");
+        assert_eq!(merged.note, "Known");
+        assert!(merged.extra.iter().any(|l| l.ends_with(".X-ABLabel:Cabin")));
+        assert!(merged.extra.iter().any(|l| l.starts_with("BDAY")));
+        // Nothing new the second time.
+        let r = b.import(vcf).unwrap();
+        assert_eq!((r.added, r.merged, r.skipped), (0, 0, 2));
+        assert_eq!(b.contacts().len(), 2);
     }
 }
