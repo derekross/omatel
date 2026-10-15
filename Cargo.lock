@@ -1143,7 +1143,7 @@ dependencies = [
 
 [[package]]
 name = "omamessages"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1164,7 +1164,7 @@ dependencies = [
 
 [[package]]
 name = "omaphone"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "omatel-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "omatel-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "tempfile",
@@ -1218,7 +1218,7 @@ dependencies = [
 
 [[package]]
 name = "omatel-contacts"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "phonenumber",
  "tempfile",
@@ -1228,7 +1228,7 @@ dependencies = [
 
 [[package]]
 name = "omatel-mm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "futures-util",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "omatel-mock"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1257,7 +1257,7 @@ dependencies = [
 
 [[package]]
 name = "omatel-notify"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures-util",
  "omatel-mock",
@@ -1268,7 +1268,7 @@ dependencies = [
 
 [[package]]
 name = "omatel-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "omatel-contacts",
  "rusqlite",
@@ -1281,7 +1281,7 @@ dependencies = [
 
 [[package]]
 name = "omatel-theme"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gtk4",
  "libadwaita",
