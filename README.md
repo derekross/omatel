@@ -71,6 +71,45 @@ an x86_64 laptop (see [docs/development.md](docs/development.md)).
 | Settings | `~/.config/omatel/settings.toml` |
 | Logs | `journalctl -t omatel-agent`, `-t omaphone`, `-t omamessages` (states only, never numbers or text) |
 
+## Contacts, khard and other tools
+
+The address book is a plain vCard folder (a vdir): one `.vcf` file per
+contact under `~/.local/share/contacts/<book>/` (`$XDG_DATA_HOME/contacts`),
+with new contacts in `default`. Phone and Messages notice changes other
+tools make, edits in place included, and a book added later. Phone never
+overwrites a card that changed on disk after it opened it.
+
+To use [khard](https://github.com/lucc/khard) on the same contacts, add
+the books to `~/.config/khard/khard.conf` (omatel never writes this file
+for you):
+
+```
+[addressbooks]
+[[default]]
+path = ~/.local/share/contacts/default/
+```
+
+Add one `[[name]]` section per book. Recent khard versions also take a
+glob with `type = discover`, which makes every book an address book of
+its own, including books added later:
+
+```
+[addressbooks]
+[[contacts]]
+path = ~/.local/share/contacts/*
+type = discover
+```
+
+Scripts and AI agents can read the `.vcf` files directly: each is a
+vCard 3.0 text file (UTF-8, CRLF line endings) with a `UID`, `FN`, `N`,
+`TEL` and `EMAIL` lines, and any lines another app added. To change one,
+write a whole new file and rename it over the old one, so the apps never
+read half a card.
+
+Importing in Phone (Contacts tab, or the menu) takes the `.vcf` that
+Google Contacts and Apple's Contacts (iCloud) export, merges duplicates
+and reports how many contacts were added, merged and skipped.
+
 ## More
 
 - [docs/architecture.md](docs/architecture.md): how the agent, the apps and
