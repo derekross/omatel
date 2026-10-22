@@ -593,3 +593,27 @@ async fn modem_appearing_later_and_open_conversation() {
         conv.to_string()
     ]));
 }
+
+/// With the shell's call card on the bus (it owns org.omamobile.CallCard),
+/// the card shows the ringing call: no toast and no answer page from the
+/// agent, while the call still rings and can be answered.
+#[tokio::test]
+async fn the_shell_call_card_replaces_toast_and_page() {
+    let r = rig().await;
+    let card = r._session.connect().await.unwrap();
+    card.request_name("org.omamobile.CallCard").await.unwrap();
+    let mut states = r.phone.receive_call_state_changed().await.unwrap();
+    let path = r.modem.ring(FRIEND).await.unwrap();
+    let first = next(&mut states).await.args().unwrap().call;
+    assert_eq!(first.state, "ringing-in");
+    // Give the agent the time it takes to raise a toast and open a page.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(!r.notes.open().iter().any(|n| n.summary == "Incoming call"));
+    assert!(!r
+        .launched()
+        .iter()
+        .any(|l| l.first().map(String::as_str) == Some("omaphone")));
+    r.phone.answer(path.as_str()).await.unwrap();
+    let active = next(&mut states).await.args().unwrap().call;
+    assert_eq!(active.state, "active");
+}

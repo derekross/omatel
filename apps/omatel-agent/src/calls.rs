@@ -16,6 +16,10 @@ use zbus::zvariant::OwnedObjectPath;
 use crate::util::now_ms;
 use crate::{audio, iface, Agent, Target, Tracked};
 
+/// The name Omarchy Mobile's shell call card owns while it runs
+/// (omamobile-shell's omamobile-call-watch).
+const CALL_CARD: &str = "org.omamobile.CallCard";
+
 async fn proxy(agent: &Agent, path: &str) -> zbus::Result<mm::CallProxy<'static>> {
     mm::CallProxy::builder(&agent.system)
         .path(path.to_string())?
@@ -148,6 +152,11 @@ async fn ringing(agent: &Arc<Agent>, key: &str) {
     }
     let settings = agent.settings();
     let silenced = !settings.ring_unknown_callers && !agent.is_contact(&info.number);
+    // Omarchy Mobile's shell shows ringing calls itself (its call card owns
+    // this name): no toast and no answer page of ours on top of it. A
+    // silenced call keeps its quiet notification, which the card doesn't
+    // replace.
+    let card = audio::has_owner(&agent.session, CALL_CARD).await;
     iface::incoming_call(agent, &info).await;
     iface::call_state_changed(agent, info.clone()).await;
 
@@ -176,19 +185,23 @@ async fn ringing(agent: &Arc<Agent>, key: &str) {
     };
     n.timeout = 0;
     n.public_summary = Some("Incoming call".into());
-    let note = match agent.notifier.show(&n).await {
-        Ok(id) => {
-            agent
-                .notes
-                .lock()
-                .unwrap()
-                .by_id
-                .insert(id, Target::IncomingCall(key.to_string()));
-            Some(id)
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "no incoming-call notification");
-            None
+    let note = if card && !silenced {
+        None
+    } else {
+        match agent.notifier.show(&n).await {
+            Ok(id) => {
+                agent
+                    .notes
+                    .lock()
+                    .unwrap()
+                    .by_id
+                    .insert(id, Target::IncomingCall(key.to_string()));
+                Some(id)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "no incoming-call notification");
+                None
+            }
         }
     };
     let feedback = if silenced {
@@ -213,7 +226,7 @@ async fn ringing(agent: &Arc<Agent>, key: &str) {
         stop_alerting(agent, feedback, note).await;
         return;
     }
-    if settings.show_incoming_call_page && !silenced {
+    if settings.show_incoming_call_page && !silenced && !card {
         agent.cfg.launcher.launch(&["omaphone", "--incoming", key]);
     }
 }

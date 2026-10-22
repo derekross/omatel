@@ -42,7 +42,7 @@ trait CallAudio {
     fn mute_mic(&self, mute: bool) -> zbus::Result<bool>;
 }
 
-async fn has_owner(conn: &Connection, name: &str) -> bool {
+pub(crate) async fn has_owner(conn: &Connection, name: &str) -> bool {
     let Ok(dbus) = zbus::fdo::DBusProxy::new(conn).await else {
         return false;
     };
