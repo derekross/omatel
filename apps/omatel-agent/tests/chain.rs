@@ -190,6 +190,7 @@ async fn agent_over_the_real_bridge_and_ril() {
         settings_path: d.join("settings.toml"),
         launcher: Launcher::Off,
         lock_probe: LockProbe::Fixed(false),
+        dnd_path: dir.path().join("omarchy/notifications.json"),
     };
     let (sys, ses) = (
         system.connect().await.unwrap(),

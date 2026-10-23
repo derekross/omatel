@@ -15,6 +15,7 @@
 //! | `ListCalls() -> a(sssssxx)` | method | [`CallInfo`] for every call the modem has |
 //! | `MarkMissedSeen()` | method | clears the missed-call badge and notification |
 //! | `Muted b`, `Route s`, `AudioRouting b`, `ModemState s`, `EmergencyNumbers as`, `MissedCalls u` | properties | |
+//! | `SilencedCalls as` | property | ringing calls not rung: unknown callers when `ring_unknown_callers` is off, and anyone but a starred contact during Omarchy's Do Not Disturb |
 //! | `IncomingCall(s id, s number, s name)` | signal | a call starts ringing (not for blocked numbers) |
 //! | `CallStateChanged((sssssxx))` | signal | [`CallInfo`] after any change |
 //! | `CallLogChanged()` | signal | the call log gained or lost entries |
@@ -130,6 +131,8 @@ pub trait Phone1 {
     fn emergency_numbers(&self) -> zbus::Result<Vec<String>>;
     #[zbus(property)]
     fn missed_calls(&self) -> zbus::Result<u32>;
+    #[zbus(property)]
+    fn silenced_calls(&self) -> zbus::Result<Vec<String>>;
 
     #[zbus(signal)]
     fn incoming_call(&self, id: String, number: String, name: String) -> zbus::Result<()>;

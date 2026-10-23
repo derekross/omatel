@@ -76,6 +76,7 @@ async fn rig_with(locked: bool, inline_reply: bool) -> Rig {
         settings_path: dir.path().join("config/settings.toml"),
         launcher: Launcher::Record(launches.clone()),
         lock_probe: LockProbe::Fixed(locked),
+        dnd_path: dir.path().join("omarchy/notifications.json"),
     };
     let sys = system.connect().await.unwrap();
     let ses = session.connect().await.unwrap();
@@ -551,6 +552,7 @@ async fn modem_appearing_later_and_open_conversation() {
         settings_path: dir.path().join("settings.toml"),
         launcher: Launcher::Record(launches.clone()),
         lock_probe: LockProbe::Fixed(false),
+        dnd_path: dir.path().join("omarchy/notifications.json"),
     };
     let (sys, ses) = (
         system.connect().await.unwrap(),
@@ -616,4 +618,45 @@ async fn the_shell_call_card_replaces_toast_and_page() {
     r.phone.answer(path.as_str()).await.unwrap();
     let active = next(&mut states).await.args().unwrap().call;
     assert_eq!(active.state, "active");
+}
+
+/// During Omarchy's Do Not Disturb a call rings only for a starred
+/// contact; any other caller is silenced: listed in SilencedCalls, with the
+/// quiet notification, and no answer page.
+#[tokio::test]
+async fn do_not_disturb_silences_all_but_starred() {
+    let r = rig().await;
+    let dnd = r.dir.path().join("omarchy/notifications.json");
+    std::fs::create_dir_all(dnd.parent().unwrap()).unwrap();
+    std::fs::write(&dnd, "{\"version\": 3, \"dnd\": true}\n").unwrap();
+    let mut states = r.phone.receive_call_state_changed().await.unwrap();
+
+    let path = r.modem.ring(FRIEND).await.unwrap();
+    assert_eq!(
+        next(&mut states).await.args().unwrap().call.state,
+        "ringing-in"
+    );
+    eventually(|| async { r.phone.silenced_calls().await.unwrap() == vec![path.to_string()] })
+        .await;
+    eventually(|| async { r.notes.open().iter().any(|n| n.summary == "Silenced call") }).await;
+    assert!(!r
+        .launched()
+        .iter()
+        .any(|l| l.first().map(String::as_str) == Some("omaphone")));
+    r.phone.decline(path.as_str()).await.unwrap();
+    eventually(|| async { r.phone.silenced_calls().await.unwrap().is_empty() }).await;
+
+    // Starred, the same contact rings through.
+    let mut book = AddressBook::open(r.dir.path().join("contacts"), "US");
+    let mut c = book.contacts()[0].clone();
+    c.set_starred(true);
+    book.save(&c).unwrap();
+    let path = r.modem.ring(FRIEND).await.unwrap();
+    eventually(|| async { r.notes.open().iter().any(|n| n.summary == "Incoming call") }).await;
+    assert!(r.phone.silenced_calls().await.unwrap().is_empty());
+    r.phone.decline(path.as_str()).await.unwrap();
+
+    // Do Not Disturb off: rings again for everyone.
+    std::fs::write(&dnd, "{\"version\": 3, \"dnd\": false}\n").unwrap();
+    assert!(r.phone.silenced_calls().await.unwrap().is_empty());
 }

@@ -64,6 +64,9 @@ pub struct Config {
     /// How to open the apps (answer page, a conversation).
     pub launcher: Launcher,
     pub lock_probe: LockProbe,
+    /// Omarchy's notification settings (`~/.local/state/omarchy/
+    /// notifications.json`), whose `dnd` is Do Not Disturb.
+    pub dnd_path: PathBuf,
 }
 
 impl Config {
@@ -74,6 +77,10 @@ impl Config {
             settings_path: omatel_api::settings::path(),
             launcher: Launcher::Spawn,
             lock_probe: LockProbe::System,
+            dnd_path: std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default()
+                .join(".local/state/omarchy/notifications.json"),
         }
     }
 }
@@ -169,6 +176,26 @@ impl Agent {
         let mut book = self.contacts.lock().unwrap();
         book.reload_if_changed();
         book.name_for(raw).unwrap_or_default()
+    }
+
+    /// A starred (favorite) contact's number: rings through Do Not Disturb.
+    pub(crate) fn is_starred(&self, raw: &str) -> bool {
+        let mut book = self.contacts.lock().unwrap();
+        book.reload_if_changed();
+        match book.lookup(raw) {
+            Some(m) => book.get(&m.uid).is_some_and(|c| c.starred()),
+            None => false,
+        }
+    }
+
+    /// Omarchy's Do Not Disturb, read afresh: the shell writes it on each
+    /// toggle. A missing or unreadable file means off.
+    pub(crate) fn do_not_disturb(&self) -> bool {
+        std::fs::read_to_string(&self.cfg.dnd_path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v.get("dnd").and_then(|d| d.as_bool()))
+            .unwrap_or(false)
     }
 
     pub(crate) fn is_contact(&self, raw: &str) -> bool {

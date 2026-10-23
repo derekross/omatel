@@ -10,6 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+serde_json.workspace = true
 omatel-api.workspace = true
 omatel-mm.workspace = true
 omatel-store.workspace = true
@@ -26,6 +27,5 @@ zbus.workspace = true
 
 [dev-dependencies]
 omatel-mock.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }

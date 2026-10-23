@@ -195,6 +195,20 @@ impl Phone {
         self.agent.emergency_numbers()
     }
 
+    /// Ringing calls the agent silenced (an unknown caller, or Do Not
+    /// Disturb): logged and shown quietly, never rung.
+    #[zbus(property)]
+    fn silenced_calls(&self) -> Vec<String> {
+        let calls = self.agent.calls.lock().unwrap();
+        let mut ids: Vec<String> = calls
+            .values()
+            .filter(|t| t.silenced && t.info.is_ringing_in())
+            .map(|t| t.info.id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
     #[zbus(property)]
     fn missed_calls(&self) -> u32 {
         self.agent.log.lock().unwrap().unseen_missed().unwrap_or(0) as u32
@@ -375,6 +389,21 @@ pub async fn call_log_changed(agent: &Agent) {
 pub async fn messages_changed(agent: &Agent, conversation: i64) {
     if let Some(e) = emitter(agent, MESSAGES_PATH) {
         let _ = Messages::messages_changed(&e, conversation).await;
+    }
+}
+
+pub async fn silenced_calls_changed(agent: &Agent) {
+    if let Ok(i) = agent
+        .session
+        .object_server()
+        .interface::<_, Phone>(PHONE_PATH)
+        .await
+    {
+        let _ = i
+            .get()
+            .await
+            .silenced_calls_changed(i.signal_emitter())
+            .await;
     }
 }
 

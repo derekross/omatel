@@ -151,7 +151,20 @@ async fn ringing(agent: &Arc<Agent>, key: &str) {
         return;
     }
     let settings = agent.settings();
-    let silenced = !settings.ring_unknown_callers && !agent.is_contact(&info.number);
+    // Silenced: logged and shown quietly, no ring. Unknown callers when the
+    // setting says so, and anyone but a starred contact during Omarchy's
+    // Do Not Disturb (Android's default for calls).
+    let dnd = agent.do_not_disturb();
+    let silenced = (!settings.ring_unknown_callers && !agent.is_contact(&info.number))
+        || (dnd && !agent.is_starred(&info.number));
+    // Recorded before the signals go out, so a client that reads
+    // SilencedCalls on IncomingCall (the shell's call card) sees it.
+    if let Some(t) = agent.calls.lock().unwrap().get_mut(key) {
+        t.silenced = silenced;
+    }
+    if silenced {
+        iface::silenced_calls_changed(agent).await;
+    }
     // Omarchy Mobile's shell shows ringing calls itself (its call card owns
     // this name): no toast and no answer page of ours on top of it. A
     // silenced call keeps its quiet notification, which the card doesn't
