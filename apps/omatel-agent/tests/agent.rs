@@ -171,6 +171,11 @@ async fn incoming_call_answered_logged_and_deleted() {
         .unwrap();
     assert!(note.has_action("answer") && note.has_action("decline"));
     assert_eq!(note.body, "Alex Example");
+    assert_eq!(note.app_name, "Phone");
+    assert_eq!(
+        note.hint_str("desktop-entry").as_deref(),
+        Some("org.omamobile.Phone")
+    );
     eventually(|| async {
         r.launched().contains(&vec![
             "omaphone".into(),
@@ -233,6 +238,13 @@ async fn missed_call_notifies_and_is_marked_seen() {
         .unwrap();
     assert!(n.has_action("call-back") && n.has_action("message"));
     assert_eq!(n.body, "(202) 555-0150");
+    // Shades and the lock screen title it with the app: Phone, not omatel.
+    assert_eq!(n.app_name, "Phone");
+    assert_eq!(n.app_icon, "org.omamobile.Phone");
+    assert_eq!(
+        n.hint_str("desktop-entry").as_deref(),
+        Some("org.omamobile.Phone")
+    );
     // "Message" opens Messages on that number and clears the badge.
     r.notes.invoke(n.id, "message").await.unwrap();
     eventually(|| async {
@@ -352,6 +364,12 @@ async fn incoming_sms_stored_deleted_notified_and_replied() {
         .unwrap();
     assert_eq!(n.body, "Dinner at seven?");
     assert!(n.has_action("inline-reply"));
+    assert_eq!(n.app_name, "Messages");
+    assert_eq!(n.app_icon, "org.omamobile.Messages");
+    assert_eq!(
+        n.hint_str("desktop-entry").as_deref(),
+        Some("org.omamobile.Messages")
+    );
     assert_eq!(n.hint_str("category").as_deref(), Some("im.received"));
     assert_eq!(
         n.hint_str("x-omamobile-public-summary").as_deref(),

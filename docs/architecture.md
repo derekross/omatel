@@ -130,6 +130,11 @@ otherwise a Reply button that opens Messages.
   message", unless the owner turned on details. Every notification also
   carries `x-omamobile-public-summary`, so a lock screen that reads it
   stays private even when the lock state can't be read.
+- Every notification speaks for an app, not for the agent: message
+  notifications come from "Messages" (`org.omamobile.Messages`, its
+  icon), call notifications from "Phone" (`org.omamobile.Phone`). The
+  name is the freedesktop `app_name`, the title Omarchy's notification
+  shade and the lock screen show on the card.
 
 **Sending.** The message is written as `sending`, then sent in the
 background: `Messaging.Create`, then `Sms.Send`.

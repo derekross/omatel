@@ -16,6 +16,7 @@ pub const PATH: &str = "/org/freedesktop/Notifications";
 pub struct Shown {
     pub id: u32,
     pub app_name: String,
+    pub app_icon: String,
     pub replaces_id: u32,
     pub summary: String,
     pub body: String,
@@ -70,7 +71,7 @@ impl Server {
         &self,
         app_name: String,
         replaces_id: u32,
-        _app_icon: String,
+        app_icon: String,
         summary: String,
         body: String,
         actions: Vec<String>,
@@ -91,6 +92,7 @@ impl Server {
         s.shown.push(Shown {
             id,
             app_name,
+            app_icon,
             replaces_id,
             summary,
             body,

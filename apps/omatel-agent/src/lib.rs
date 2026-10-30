@@ -276,7 +276,7 @@ pub async fn start(
     let blocked = BlockList::open(&cfg.data_dir.join("blocked.db"))?;
     let settings = Settings::load_from(&cfg.settings_path);
     let contacts = AddressBook::open(&cfg.contacts_dir, &settings.region(number::default_region));
-    let notifier = Notifier::new(&session, "omatel", "org.omamobile.Messages").await?;
+    let notifier = Notifier::new(&session).await?;
     let agent = Arc::new(Agent {
         cfg,
         system,
