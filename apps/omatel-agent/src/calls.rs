@@ -9,7 +9,7 @@ use futures_util::StreamExt;
 use omatel_api::CallInfo;
 use omatel_contacts::number;
 use omatel_mm as mm;
-use omatel_notify::{Notification, Urgency, DEFAULT_ACTION};
+use omatel_notify::{Notification, Urgency, DEFAULT_ACTION, PHONE};
 use omatel_store::{CallDirection, CallOutcome, CallRecord};
 use zbus::zvariant::OwnedObjectPath;
 
@@ -179,6 +179,7 @@ async fn ringing(agent: &Arc<Agent>, key: &str) {
         info.name.clone()
     };
     let mut n = Notification::new(
+        PHONE,
         if silenced {
             "Silenced call"
         } else {
@@ -189,7 +190,6 @@ async fn ringing(agent: &Arc<Agent>, key: &str) {
     .action(DEFAULT_ACTION, "Open")
     .action("answer", "Answer")
     .action("decline", "Decline");
-    n.icon = "call-start-symbolic".into();
     n.category = "call.incoming".into();
     n.urgency = if silenced {
         Urgency::Low
@@ -379,11 +379,10 @@ async fn missed_notification(agent: &Arc<Agent>, info: &CallInfo) {
     } else {
         (format!("{count} missed calls"), format!("Latest: {who}"))
     };
-    let mut n = Notification::new(summary, body)
+    let mut n = Notification::new(PHONE, summary, body)
         .action(DEFAULT_ACTION, "Open")
         .action("call-back", "Call back")
         .action("message", "Message");
-    n.icon = "call-missed-symbolic".into();
     n.category = "call.unanswered".into();
     n.resident = true;
     n.public_summary = Some("Missed call".into());

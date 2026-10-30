@@ -15,13 +15,11 @@ async fn show_replace_reply_and_close() {
         .await
         .unwrap();
     let conn = bus.connect().await.unwrap();
-    let n = Notifier::new(&conn, "Messages", "org.omamobile.Messages")
-        .await
-        .unwrap();
+    let n = Notifier::new(&conn).await.unwrap();
     assert!(n.supports_inline_reply().await);
     let mut events = n.events().await.unwrap();
 
-    let mut note = Notification::new("A sender", "first").action(DEFAULT_ACTION, "Open");
+    let mut note = Notification::new(MESSAGES, "A sender", "first").action(DEFAULT_ACTION, "Open");
     note.reply_placeholder = Some("Reply".into());
     note.category = "im.received".into();
     note.public_summary = Some("New message".into());
@@ -42,6 +40,8 @@ async fn show_replace_reply_and_close() {
         open[0].hint_str("desktop-entry").as_deref(),
         Some("org.omamobile.Messages")
     );
+    assert_eq!(open[0].app_name, "Messages");
+    assert_eq!(open[0].app_icon, "org.omamobile.Messages");
 
     server.reply(id, "typed reply").await.unwrap();
     let e = tokio::time::timeout(Duration::from_secs(5), events.next())
@@ -83,8 +83,48 @@ async fn without_inline_reply_support() {
         .await
         .unwrap();
     let conn = bus.connect().await.unwrap();
-    let n = Notifier::new(&conn, "Phone", "org.omamobile.Phone")
+    let n = Notifier::new(&conn).await.unwrap();
+    assert!(!n.supports_inline_reply().await);
+}
+
+#[tokio::test]
+async fn each_notification_names_its_own_app() {
+    let bus = PrivateBus::start().unwrap();
+    let server = MockNotifications::start(bus.connect().await.unwrap(), false)
         .await
         .unwrap();
-    assert!(!n.supports_inline_reply().await);
+    let conn = bus.connect().await.unwrap();
+    let n = Notifier::new(&conn).await.unwrap();
+    n.show(&Notification::new(PHONE, "Missed call", "a caller"))
+        .await
+        .unwrap();
+    n.show(&Notification::new(MESSAGES, "A sender", "text"))
+        .await
+        .unwrap();
+    let shown = server.open();
+    let names: Vec<(&str, &str, Option<String>)> = shown
+        .iter()
+        .map(|s| {
+            (
+                s.app_name.as_str(),
+                s.app_icon.as_str(),
+                s.hint_str("desktop-entry"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            (
+                "Phone",
+                "org.omamobile.Phone",
+                Some("org.omamobile.Phone".into())
+            ),
+            (
+                "Messages",
+                "org.omamobile.Messages",
+                Some("org.omamobile.Messages".into())
+            ),
+        ]
+    );
 }

@@ -7,9 +7,13 @@
 //! (telephony plan §7.2, T5); until then [`Notifier::supports_inline_reply`]
 //! is false and the agent offers a "Reply" button that opens Messages.
 //!
-//! Notifications carry `desktop-entry` and `category` hints, and, for the
-//! lock screen, `x-omamobile-private` with `x-omamobile-public-summary`:
-//! what a lock screen should show instead of the sender and text.
+//! Each notification speaks for one app ([`App`]): its name is the
+//! freedesktop `app_name`, which Omarchy's notification shade and the
+//! lock screen show as the card's title, its icon the `app_icon`, and its
+//! desktop id the `desktop-entry` hint. Notifications also carry a
+//! `category` hint, and, for the lock screen, `x-omamobile-private` with
+//! `x-omamobile-public-summary`: what a lock screen should show instead of
+//! the sender and text.
 
 use std::collections::HashMap;
 
@@ -51,6 +55,32 @@ pub const INLINE_REPLY: &str = "inline-reply";
 /// The action key a server sends when the notification itself is clicked.
 pub const DEFAULT_ACTION: &str = "default";
 
+/// The app a notification speaks for: the name and icon a notification
+/// shade shows, and the desktop entry that names the app to the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct App {
+    /// The freedesktop `app_name`: the name people read on the card.
+    pub name: &'static str,
+    /// The `desktop-entry` hint: the app's desktop file, without `.desktop`.
+    pub desktop_entry: &'static str,
+    /// The `app_icon`: a themed icon name.
+    pub icon: &'static str,
+}
+
+/// Messages (omamessages): new messages and anything about a conversation.
+pub const MESSAGES: App = App {
+    name: "Messages",
+    desktop_entry: "org.omamobile.Messages",
+    icon: "org.omamobile.Messages",
+};
+
+/// Phone (omaphone): incoming and missed calls.
+pub const PHONE: App = App {
+    name: "Phone",
+    desktop_entry: "org.omamobile.Phone",
+    icon: "org.omamobile.Phone",
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Urgency {
     Low = 0,
@@ -60,8 +90,11 @@ pub enum Urgency {
 
 #[derive(Debug, Clone)]
 pub struct Notification {
+    /// The app it speaks for (name, desktop entry).
+    pub app: App,
     pub summary: String,
     pub body: String,
+    /// The app's icon unless set otherwise.
     pub icon: String,
     /// Buttons: (key, label). Put [`DEFAULT_ACTION`] first for a click on
     /// the notification itself.
@@ -82,11 +115,12 @@ pub struct Notification {
 }
 
 impl Notification {
-    pub fn new(summary: impl Into<String>, body: impl Into<String>) -> Notification {
+    pub fn new(app: App, summary: impl Into<String>, body: impl Into<String>) -> Notification {
         Notification {
+            app,
             summary: summary.into(),
             body: body.into(),
-            icon: String::new(),
+            icon: app.icon.into(),
             actions: Vec::new(),
             reply_placeholder: None,
             replaces: 0,
@@ -128,20 +162,12 @@ pub enum Event {
 #[derive(Clone)]
 pub struct Notifier {
     proxy: NotificationsProxy<'static>,
-    app_name: String,
-    desktop_entry: String,
 }
 
 impl Notifier {
-    pub async fn new(
-        conn: &Connection,
-        app_name: &str,
-        desktop_entry: &str,
-    ) -> zbus::Result<Notifier> {
+    pub async fn new(conn: &Connection) -> zbus::Result<Notifier> {
         Ok(Notifier {
             proxy: NotificationsProxy::new(conn).await?,
-            app_name: app_name.into(),
-            desktop_entry: desktop_entry.into(),
         })
     }
 
@@ -156,7 +182,7 @@ impl Notifier {
     /// Show (or replace) a notification; returns its id.
     pub async fn show(&self, n: &Notification) -> zbus::Result<u32> {
         let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
-        hints.insert("desktop-entry", Value::from(self.desktop_entry.as_str()));
+        hints.insert("desktop-entry", Value::from(n.app.desktop_entry));
         hints.insert("urgency", Value::U8(n.urgency as u8));
         hints.insert("sender-pid", Value::I64(std::process::id() as i64));
         if !n.category.is_empty() {
@@ -176,14 +202,7 @@ impl Notifier {
         let actions: Vec<&str> = actions.iter().map(String::as_str).collect();
         self.proxy
             .notify(
-                &self.app_name,
-                n.replaces,
-                &n.icon,
-                &n.summary,
-                &n.body,
-                &actions,
-                hints,
-                n.timeout,
+                n.app.name, n.replaces, &n.icon, &n.summary, &n.body, &actions, hints, n.timeout,
             )
             .await
     }
@@ -241,7 +260,7 @@ mod tests {
 
     #[test]
     fn action_list_with_reply() {
-        let mut n = Notification::new("s", "b")
+        let mut n = Notification::new(MESSAGES, "s", "b")
             .action(DEFAULT_ACTION, "Open")
             .action("mark-read", "Mark as read");
         n.reply_placeholder = Some("Reply".into());
@@ -255,6 +274,18 @@ mod tests {
                 "inline-reply",
                 "Reply"
             ]
+        );
+    }
+
+    #[test]
+    fn the_app_icon_by_default() {
+        assert_eq!(
+            Notification::new(PHONE, "s", "b").icon,
+            "org.omamobile.Phone"
+        );
+        assert_eq!(
+            Notification::new(MESSAGES, "s", "b").icon,
+            "org.omamobile.Messages"
         );
     }
 }

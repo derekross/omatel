@@ -8,7 +8,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use omatel_contacts::number;
 use omatel_mm as mm;
-use omatel_notify::{Notification, DEFAULT_ACTION};
+use omatel_notify::{Notification, DEFAULT_ACTION, MESSAGES};
 use omatel_store::{Direction, MessageState, NewIncoming};
 use zbus::zvariant::OwnedObjectPath;
 
@@ -153,7 +153,7 @@ pub async fn notify(agent: &Arc<Agent>, conversation: i64) {
     };
     let private = !settings.lockscreen_details && agent.is_locked().await;
     let mut n = if private {
-        Notification::new("New message", "")
+        Notification::new(MESSAGES, "New message", "")
     } else {
         let summary = if unread.len() > 1 {
             format!("{who} ({})", unread.len())
@@ -167,7 +167,7 @@ pub async fn notify(agent: &Arc<Agent>, conversation: i64) {
             .rev()
             .map(|m| m.body.as_str())
             .collect();
-        Notification::new(summary, lines.join("\n"))
+        Notification::new(MESSAGES, summary, lines.join("\n"))
     };
     n = n.action(DEFAULT_ACTION, "Open");
     if !private {
@@ -178,7 +178,6 @@ pub async fn notify(agent: &Arc<Agent>, conversation: i64) {
         }
     }
     n = n.action("mark-read", "Mark as read");
-    n.icon = "mail-unread-symbolic".into();
     n.category = "im.received".into();
     n.resident = true;
     if !settings.lockscreen_details {
