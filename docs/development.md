@@ -55,6 +55,13 @@ bin/cross package     # pkgbuild/omatel-agent-<version>-1-aarch64.pkg.tar.zst
     inline reply, delivery report, retry, "New message" on a locked
     phone, muted, blocked and disabled notifications;
   - a modem that appears late.
+- **`apps/omatel-agent/tests/mms.rs`** runs the agent against the scripted
+  mmsd-tng (`omatel_mock::mmsd`) on the private session bus: a group MMS
+  with text and a picture received, stored and notified; a picture alone;
+  messages waiting in mmsd-tng imported when it starts, and deletions
+  cleaned up there; a group send with an attachment followed through sent
+  and delivered; text to one person staying SMS; a send without mmsd-tng
+  failing clearly and sent by Retry later; a refused and a too-big MMS.
 - **`scripts/chain-test.sh`** runs the agent over the real stack in a
   container: the agent, then `omamobile-mmd` and `omamobile-sitd` from an
   Omarchy Mobile checkout (`OMARCHY_MOBILE`, default
@@ -104,3 +111,26 @@ object paths only.
 - Calls and SMS on a real SIM transmit and cost money, so the human runs
   them, following the runbook in Omarchy Mobile's
   `docs/TELEPHONY-APPS-PLAN.md`.
+
+## Going back to an older agent
+
+The message store's schema moves forward when a newer agent opens it, and
+an older agent refuses a newer schema. Two ways back, both keeping the
+messages:
+
+- **The copy.** Before it migrates an existing store, the agent keeps a
+  copy at the old schema next to it (`messages.db.schema1`, mode 0600,
+  once per schema). It has everything up to the migration and nothing
+  after.
+- **Taking the schema back.** Schema 2 (0.3, MMS) only adds an index, two
+  lists of deleted MMS and part files still to clean up, and their
+  triggers, so it can be undone with every message kept:
+
+  ```
+  systemctl --user stop omatel-agent
+  omatel-agent --downgrade-store 1
+  ```
+
+  Then install the older packages. 0.2 shows an MMS as a message without
+  its pictures; the part files of MMS deleted later stay on disk until a
+  0.3 agent cleans them up again.

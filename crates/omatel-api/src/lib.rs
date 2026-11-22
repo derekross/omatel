@@ -25,12 +25,35 @@
 //! | Member | Kind | |
 //! | --- | --- | --- |
 //! | `Send(s number, s text) -> (x conversation, x message)` | method | the call card's canned replies use it |
-//! | `SendToConversation(x conversation, s text) -> x message` | method | |
+//! | `SendToConversation(x conversation, s text) -> x message` | method | a group conversation goes as MMS |
+//! | `SendWithAttachments(as recipients, s text, a(ss) attachments) -> (x conversation, x message)` | method | since 0.3; attachments are (file path, MIME type); see below |
+//! | `SendToConversationWithAttachments(x conversation, s text, a(ss) attachments) -> x message` | method | since 0.3 |
+//! | `ListParts(x message) -> a(ssx)` | method | since 0.3: [`PartInfo`] for each attachment of a message |
 //! | `Retry(x message)` | method | a failed outgoing message, sent again as new |
 //! | `MarkRead(x conversation)` | method | also withdraws its notification |
 //! | `OpenConversation(s number)` | method | opens Messages on that thread |
 //! | `Ready b`, `ModemState s` | properties | `Ready`: the modem can send |
+//! | `MmsReady b` | property | since 0.3: mmsd-tng runs, so MMS can go out |
+//! | `MmsAvailable b` | property | since 0.3: this phone has an MMS service (mmsd-tng runs or is installed); without one, clients offer no attachments, groups or MMS settings |
 //! | `MessagesChanged(x conversation)` | signal | a message arrived or changed state |
+//!
+//! **Which transport.** The agent picks it: a message to one recipient with
+//! text only is an SMS; anything with an attachment, and anything to a
+//! group (several recipients), is an MMS through mmsd-tng
+//! (`org.ofono.mms` on the session bus). The attachment files are copied
+//! into the agent's data directory before the call returns, so the caller
+//! may delete its own copies. When mmsd-tng is installed but isn't
+//! running, the With Attachments calls keep the message as failed (Retry
+//! sends it later) and return `...Messages1.Error.MmsUnavailable`; the
+//! older calls report the failure only in the stored message, as for SMS.
+//! On a phone with no MMS service (`MmsAvailable` false), an attachment
+//! or a group message is refused up front with
+//! `...Messages1.Error.MmsUnavailable` (the older calls with a failed
+//! call) and nothing is stored.
+//!
+//! Members added in 0.3 leave the 0.2 ones as they were, so older clients
+//! keep working; a client checks for the new ones by calling them (an
+//! older agent answers `org.freedesktop.DBus.Error.UnknownMethod`).
 //!
 //! Numbers and texts travel on the user's own session bus only; the agent
 //! never logs them.
@@ -47,6 +70,8 @@ pub const MESSAGES_PATH: &str = "/org/omamobile/Messages1";
 
 /// D-Bus error names the agent returns.
 pub mod errors {
+    /// Sending an MMS while mmsd-tng isn't running (Messages1).
+    pub const MMS_UNAVAILABLE: &str = "org.omamobile.Messages1.Error.MmsUnavailable";
     pub const EMERGENCY_UNSUPPORTED: &str = "org.omamobile.Phone1.Error.EmergencyUnsupported";
     pub const NO_MODEM: &str = "org.omamobile.Phone1.Error.NoModem";
     pub const INVALID_NUMBER: &str = "org.omamobile.Phone1.Error.InvalidNumber";
@@ -100,6 +125,29 @@ impl CallInfo {
     }
 }
 
+/// One attachment of a message, as `ListParts` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct PartInfo {
+    /// The file, absolute, in the agent's data directory. Read-only for
+    /// clients: the agent deletes it with its message.
+    pub path: String,
+    /// Its MIME type, without parameters ("image/jpeg").
+    pub mime: String,
+    /// Its size in bytes.
+    pub size: i64,
+}
+
+impl PartInfo {
+    pub fn is_image(&self) -> bool {
+        self.mime.starts_with("image/")
+    }
+
+    /// The file's name, for a row that shows it.
+    pub fn name(&self) -> &str {
+        self.path.rsplit('/').next().unwrap_or(&self.path)
+    }
+}
+
 /// Audio routes for `SetRoute`.
 pub const ROUTES: &[&str] = &["earpiece", "speaker", "bluetooth"];
 
@@ -150,6 +198,19 @@ pub trait Phone1 {
 pub trait Messages1 {
     fn send(&self, number: &str, text: &str) -> zbus::Result<(i64, i64)>;
     fn send_to_conversation(&self, conversation: i64, text: &str) -> zbus::Result<i64>;
+    fn send_with_attachments(
+        &self,
+        recipients: &[&str],
+        text: &str,
+        attachments: &[(&str, &str)],
+    ) -> zbus::Result<(i64, i64)>;
+    fn send_to_conversation_with_attachments(
+        &self,
+        conversation: i64,
+        text: &str,
+        attachments: &[(&str, &str)],
+    ) -> zbus::Result<i64>;
+    fn list_parts(&self, message: i64) -> zbus::Result<Vec<PartInfo>>;
     fn retry(&self, message: i64) -> zbus::Result<()>;
     fn mark_read(&self, conversation: i64) -> zbus::Result<()>;
     fn open_conversation(&self, number: &str) -> zbus::Result<()>;
@@ -158,6 +219,10 @@ pub trait Messages1 {
     fn ready(&self) -> zbus::Result<bool>;
     #[zbus(property)]
     fn modem_state(&self) -> zbus::Result<String>;
+    #[zbus(property)]
+    fn mms_ready(&self) -> zbus::Result<bool>;
+    #[zbus(property)]
+    fn mms_available(&self) -> zbus::Result<bool>;
 
     #[zbus(signal)]
     fn messages_changed(&self, conversation: i64) -> zbus::Result<()>;
@@ -186,6 +251,18 @@ mod tests {
     #[test]
     fn call_info_signature() {
         assert_eq!(CallInfo::SIGNATURE.to_string(), "(sssssxx)");
+    }
+
+    #[test]
+    fn part_info_signature_and_name() {
+        assert_eq!(PartInfo::SIGNATURE.to_string(), "(ssx)");
+        let p = PartInfo {
+            path: "/data/omatel/parts/a1/cat.jpg".into(),
+            mime: "image/jpeg".into(),
+            size: 10,
+        };
+        assert!(p.is_image());
+        assert_eq!(p.name(), "cat.jpg");
     }
 
     #[test]

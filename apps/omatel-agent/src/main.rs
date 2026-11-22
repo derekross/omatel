@@ -14,6 +14,11 @@ struct Cli {
     /// Never open the apps (no answer page, no conversation on a click).
     #[arg(long)]
     no_launch: bool,
+    /// Take the message store back to this schema and exit, for going back
+    /// to an older omatel-agent (0.2 reads schema 1). Every message stays.
+    /// Stop the agent first (`systemctl --user stop omatel-agent`).
+    #[arg(long, value_name = "SCHEMA")]
+    downgrade_store: Option<u32>,
 }
 
 /// Log to the terminal when there is one, otherwise to the journal as
@@ -47,6 +52,12 @@ fn init_logging() {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_logging();
+    if let Some(to) = cli.downgrade_store {
+        let path = omatel_store::data_dir().join("messages.db");
+        omatel_store::MessageStore::downgrade(&path, to)?;
+        println!("message store at schema {to}");
+        return Ok(());
+    }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;

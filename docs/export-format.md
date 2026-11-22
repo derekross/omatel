@@ -49,7 +49,8 @@ Fields:
   `delivered_at`.
 - **`state`:** one of `received`, `sending`, `sent`, `delivered` or
   `failed`.
-- **`transport`:** `sms` today, `mms` later.
+- **`transport`:** `sms` or `mms`. An MMS's text is exported; its
+  attachments (the files under `parts/` in the data directory) are not.
 
 Importing merges into existing conversations by `address`.
 - A message whose direction, `at` and `body` all match one already stored

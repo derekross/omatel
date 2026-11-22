@@ -61,6 +61,7 @@ struct Shared {
     auto_answer: bool,
     fail_sends: bool,
     next_reference: u32,
+    emergency_only: bool,
 }
 
 type State = Arc<Mutex<Shared>>;
@@ -239,7 +240,7 @@ impl VoiceIface {
 
     #[zbus(property)]
     fn emergency_only(&self) -> bool {
-        false
+        self.state.lock().unwrap().emergency_only
     }
 
     #[zbus(signal)]
@@ -692,6 +693,23 @@ impl MockModem {
     /// Whether outgoing calls are answered by the far end (default yes).
     pub fn set_auto_answer(&self, on: bool) {
         self.state.lock().unwrap().auto_answer = on;
+    }
+
+    /// Set the Voice interface's EmergencyOnly property and announce the
+    /// change, as ModemManager does when the network allows emergency calls
+    /// only (and again when it clears), with no change to the modem's State.
+    pub async fn set_emergency_only(&self, on: bool) -> zbus::Result<()> {
+        self.state.lock().unwrap().emergency_only = on;
+        let iface = self
+            .conn
+            .object_server()
+            .interface::<_, VoiceIface>(MODEM)
+            .await?;
+        let emitter = iface.signal_emitter().clone();
+        let voice = iface.get().await;
+        let result = voice.emergency_only_changed(&emitter).await;
+        drop(voice);
+        result
     }
 
     /// Make every following SMS send fail (or succeed again).

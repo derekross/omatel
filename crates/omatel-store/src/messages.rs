@@ -8,15 +8,25 @@
 //! `dedupe_key` (number, network timestamp, text): the agent stores a
 //! message, then deletes it from the modem, and a crash between the two
 //! must give a duplicate that this key filters, never a lost message.
+//!
+//! MMS (transport `mms`) come from mmsd-tng. Each keeps mmsd-tng's object
+//! path in `mms_path`, unique, so a message mmsd-tng reports twice (at
+//! start-up and in a signal) is stored once. Its attachments are files in
+//! the agent's data directory (`parts/...`, stored relative to it) listed
+//! in `parts`. Deleting a message here (the apps do it straight in this
+//! database) leaves its mmsd-tng path in `mms_forgotten` and its files in
+//! `files_forgotten` by trigger: the agent deletes those from mmsd-tng and
+//! from disk later, and a forgotten path is never imported again.
 
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
-use crate::{now_ms, open, Error, Result, EXPORT_VERSION};
+use crate::{connect, downgrade, now_ms, open, Error, Result, EXPORT_VERSION};
 
-const MIGRATIONS: &[&str] = &["CREATE TABLE conversations (
+const MIGRATIONS: &[&str] = &[
+    "CREATE TABLE conversations (
         id INTEGER PRIMARY KEY,
         address TEXT NOT NULL UNIQUE,
         title TEXT NOT NULL DEFAULT '',
@@ -72,7 +82,34 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE conversations (
     CREATE TRIGGER messages_au AFTER UPDATE OF body ON messages BEGIN
         INSERT INTO messages_fts (messages_fts, rowid, body) VALUES ('delete', old.id, old.body);
         INSERT INTO messages_fts (rowid, body) VALUES (new.id, new.body);
-    END;"];
+    END;",
+    "CREATE UNIQUE INDEX messages_mms_path ON messages (mms_path) WHERE mms_path IS NOT NULL;
+    CREATE INDEX parts_message ON parts (message_id);
+    CREATE TABLE mms_forgotten (path TEXT PRIMARY KEY);
+    CREATE TABLE files_forgotten (file TEXT PRIMARY KEY);
+    CREATE TRIGGER messages_mms_ad AFTER DELETE ON messages WHEN old.mms_path IS NOT NULL BEGIN
+        INSERT OR IGNORE INTO mms_forgotten (path) VALUES (old.mms_path);
+    END;
+    CREATE TRIGGER parts_ad AFTER DELETE ON parts BEGIN
+        INSERT OR IGNORE INTO files_forgotten (file) VALUES (old.file);
+    END;",
+];
+
+/// What undoes each schema: schema 2 only adds an index, two lists and
+/// their triggers, so taking it back to 1 keeps every message (an older
+/// agent reads MMS rows as messages without their pictures). The lists of
+/// deleted MMS and part files still to clean up go with it.
+const DOWNS: &[Option<&str>] = &[
+    None,
+    Some(
+        "DROP TRIGGER IF EXISTS parts_ad;
+    DROP TRIGGER IF EXISTS messages_mms_ad;
+    DROP TABLE IF EXISTS files_forgotten;
+    DROP TABLE IF EXISTS mms_forgotten;
+    DROP INDEX IF EXISTS parts_message;
+    DROP INDEX IF EXISTS messages_mms_path;",
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -221,6 +258,66 @@ pub struct NewIncoming<'a> {
     pub received_at: Option<i64>,
 }
 
+/// An MMS to store (from mmsd-tng, in either direction).
+#[derive(Debug, Clone)]
+pub struct NewMms<'a> {
+    pub conversation: i64,
+    pub direction: Direction,
+    /// The sender in a group conversation; empty otherwise.
+    pub sender: &'a str,
+    pub body: &'a str,
+    /// When it arrived or was written, ms.
+    pub at: i64,
+    pub sent_at: Option<i64>,
+    pub state: MessageState,
+    /// mmsd-tng's object path: the dedupe key.
+    pub mms_path: &'a str,
+}
+
+/// An attachment to record: a file under the data directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewPart {
+    pub mime: String,
+    /// Relative to the data directory (`parts/...`).
+    pub file: String,
+    pub size: i64,
+}
+
+/// A stored attachment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Part {
+    pub id: i64,
+    pub message_id: i64,
+    pub mime: String,
+    /// Relative to the data directory (`parts/...`).
+    pub file: String,
+    pub size: i64,
+}
+
+impl Part {
+    /// Where the file is, under the stores' directory.
+    pub fn path(&self, data_dir: &Path) -> std::path::PathBuf {
+        data_dir.join(&self.file)
+    }
+
+    pub fn is_image(&self) -> bool {
+        self.mime.starts_with("image/")
+    }
+}
+
+/// The address of a conversation with these members (normalized
+/// numbers): one number, or a group's numbers sorted and comma-joined.
+pub fn group_address(numbers: &[&str]) -> String {
+    let mut n: Vec<&str> = numbers
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    n.sort_unstable();
+    n.dedup();
+    n.join(",")
+}
+
 #[derive(Serialize, Deserialize)]
 struct ExportConversation {
     address: String,
@@ -282,6 +379,14 @@ impl MessageStore {
         })
     }
 
+    /// Take the store at `path` back to schema `to`, for an older agent
+    /// (omatel 0.2 reads schema 1), keeping every message. Run it with the
+    /// agent stopped (`omatel-agent --downgrade-store 1`).
+    pub fn downgrade(path: &Path, to: u32) -> Result<()> {
+        let conn = connect(Some(path))?;
+        downgrade(&conn, MIGRATIONS.len(), DOWNS, to as usize)
+    }
+
     /// The conversation for an address, created if new.
     pub fn conversation_for(&self, address: &str, raw_numbers: &[&str]) -> Result<i64> {
         if let Some(id) = self
@@ -324,6 +429,20 @@ impl MessageStore {
             .optional()?)
     }
 
+    /// The conversation with these members, (normalized, as given) each,
+    /// created if new: one member is a one-to-one thread, more a group.
+    pub fn conversation_for_members(&self, members: &[(String, String)]) -> Result<i64> {
+        let mut m: Vec<&(String, String)> = members.iter().filter(|(n, _)| !n.is_empty()).collect();
+        m.sort_by(|a, b| a.0.cmp(&b.0));
+        m.dedup_by(|a, b| a.0 == b.0);
+        if m.is_empty() {
+            return Err(Error::Format("a conversation needs a member".into()));
+        }
+        let keys: Vec<&str> = m.iter().map(|(n, _)| n.as_str()).collect();
+        let raws: Vec<&str> = m.iter().map(|(_, r)| r.as_str()).collect();
+        self.conversation_for(&group_address(&keys), &raws)
+    }
+
     /// Store an incoming SMS. `Ok(None)` when it is a duplicate of one
     /// already stored. Committed (and synced) when this returns.
     pub fn insert_incoming(&self, m: &NewIncoming) -> Result<Option<(i64, i64)>> {
@@ -364,11 +483,21 @@ impl MessageStore {
 
     /// Add an outgoing message written at `now` (ms), for imports and demos.
     pub fn insert_outgoing_at(&self, conversation: i64, body: &str, now: i64) -> Result<i64> {
+        self.insert_outgoing_with(conversation, body, now, "sms")
+    }
+
+    fn insert_outgoing_with(
+        &self,
+        conversation: i64,
+        body: &str,
+        now: i64,
+        transport: &str,
+    ) -> Result<i64> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute(
-            "INSERT INTO messages (conversation_id, direction, body, at, state, read)
-             VALUES (?1, 'out', ?2, ?3, 'sending', 1)",
-            params![conversation, body, now],
+            "INSERT INTO messages (conversation_id, direction, transport, body, at, state, read)
+             VALUES (?1, 'out', ?4, ?2, ?3, 'sending', 1)",
+            params![conversation, body, now, transport],
         )?;
         let id = tx.last_insert_rowid();
         tx.execute(
@@ -423,12 +552,172 @@ impl MessageStore {
             .optional()?)
     }
 
-    /// Outgoing messages left in `sending` (the agent stopped mid-send):
-    /// marked failed so the user can retry. Returns their IDs.
-    pub fn fail_interrupted(&self) -> Result<Vec<i64>> {
-        let mut st = self
+    /// Store an MMS from mmsd-tng with its attachments, in one
+    /// transaction. `Ok(None)` when its path is already stored, or was
+    /// deleted here (forgotten): it is never imported twice.
+    pub fn insert_mms(&self, m: &NewMms, parts: &[NewPart]) -> Result<Option<i64>> {
+        let known: bool = self.conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM messages WHERE mms_path = ?1)
+                 OR EXISTS (SELECT 1 FROM mms_forgotten WHERE path = ?1)",
+            [m.mms_path],
+            |r| r.get(0),
+        )?;
+        if known {
+            return Ok(None);
+        }
+        let incoming = m.direction == Direction::In;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO messages (conversation_id, direction, transport, sender, body, at, sent_at,
+                                   state, read, mms_path)
+             VALUES (?1, ?2, 'mms', ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                m.conversation,
+                m.direction.as_str(),
+                m.sender,
+                m.body,
+                m.at,
+                m.sent_at,
+                m.state.as_str(),
+                !incoming,
+                m.mms_path
+            ],
+        )?;
+        let id = tx.last_insert_rowid();
+        insert_parts(&tx, id, parts)?;
+        // A new incoming message brings an archived conversation back.
+        tx.execute(
+            "UPDATE conversations SET last_at = max(last_at, ?2),
+                 archived = CASE WHEN ?3 THEN 0 ELSE archived END WHERE id = ?1",
+            params![m.conversation, m.at, incoming],
+        )?;
+        tx.commit()?;
+        Ok(Some(id))
+    }
+
+    /// Add an outgoing MMS in the `sending` state; its attachments follow
+    /// with [`MessageStore::add_parts`] once they are copied.
+    pub fn insert_outgoing_mms(&self, conversation: i64, body: &str) -> Result<i64> {
+        self.insert_outgoing_with(conversation, body, now_ms(), "mms")
+    }
+
+    pub fn add_parts(&self, message: i64, parts: &[NewPart]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        insert_parts(&tx, message, parts)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// A message's attachments, in the order they were added.
+    pub fn parts(&self, message: i64) -> Result<Vec<Part>> {
+        let mut st = self.conn.prepare_cached(
+            "SELECT id, message_id, mime, file, size FROM parts WHERE message_id = ?1 ORDER BY id",
+        )?;
+        let rows = st.query_map([message], |r| {
+            Ok(Part {
+                id: r.get(0)?,
+                message_id: r.get(1)?,
+                mime: r.get(2)?,
+                file: r.get(3)?,
+                size: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Remember mmsd-tng's object for a message we handed it.
+    pub fn set_mms_path(&self, id: i64, path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE messages SET mms_path = ?2 WHERE id = ?1",
+            params![id, path],
+        )?;
+        Ok(())
+    }
+
+    /// The message mmsd-tng knows by this path.
+    pub fn by_mms_path(&self, path: &str) -> Result<Option<Message>> {
+        Ok(self
             .conn
-            .prepare("SELECT id FROM messages WHERE direction = 'out' AND state = 'sending'")?;
+            .query_row(
+                &format!("SELECT {MESSAGE_COLUMNS} FROM messages m WHERE m.mms_path = ?1"),
+                [path],
+                message,
+            )
+            .optional()?)
+    }
+
+    pub fn mms_path(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT mms_path FROM messages WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?
+            .flatten())
+    }
+
+    /// Unlink a message from its mmsd-tng object (a retry sends a new
+    /// one); the old path goes to the forgotten list.
+    pub fn forget_mms_path(&self, id: i64) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "INSERT OR IGNORE INTO mms_forgotten (path)
+             SELECT mms_path FROM messages WHERE id = ?1 AND mms_path IS NOT NULL",
+            [id],
+        )?;
+        tx.execute("UPDATE messages SET mms_path = NULL WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Outgoing MMS still in mmsd-tng's hands (`sending` with a path).
+    pub fn mms_in_flight(&self) -> Result<Vec<(i64, String)>> {
+        let mut st = self.conn.prepare(
+            "SELECT id, mms_path FROM messages
+             WHERE direction = 'out' AND state = 'sending' AND mms_path IS NOT NULL",
+        )?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// mmsd-tng paths of messages deleted here, to delete there too.
+    pub fn forgotten_mms(&self) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT path FROM mms_forgotten")?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Drop a forgotten path once mmsd-tng no longer has it. It is still
+    /// never imported again: a stored message keeps it, a deleted one
+    /// is gone from mmsd-tng.
+    pub fn drop_forgotten_mms(&self, path: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM mms_forgotten WHERE path = ?1", [path])?;
+        Ok(())
+    }
+
+    /// Attachment files of deleted messages, to delete from disk.
+    pub fn forgotten_files(&self) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT file FROM files_forgotten")?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn drop_forgotten_file(&self, file: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM files_forgotten WHERE file = ?1", [file])?;
+        Ok(())
+    }
+
+    /// Outgoing messages left in `sending` (the agent stopped mid-send):
+    /// marked failed so the user can retry. Returns their IDs. An MMS
+    /// that mmsd-tng already holds (it has a path) is still being sent
+    /// there; the agent follows it when mmsd-tng is back.
+    pub fn fail_interrupted(&self) -> Result<Vec<i64>> {
+        let mut st = self.conn.prepare(
+            "SELECT id FROM messages WHERE direction = 'out' AND state = 'sending'
+             AND mms_path IS NULL",
+        )?;
         let ids: Vec<i64> = st
             .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
@@ -699,9 +988,78 @@ impl MessageStore {
     }
 }
 
+fn insert_parts(tx: &rusqlite::Transaction, message: i64, parts: &[NewPart]) -> Result<()> {
+    for p in parts {
+        tx.execute(
+            "INSERT INTO parts (message_id, mime, file, size) VALUES (?1, ?2, ?3, ?4)",
+            params![message, p.mime, p.file, p.size],
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store made by omatel 0.2 (schema 1) moves to schema 2 with a copy
+    /// kept at schema 1, can be taken back to 1 with every message, opens
+    /// as 0.2 opens it, and moves forward again.
+    #[test]
+    fn schema_2_has_a_way_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("messages.db");
+        {
+            let old = open(Some(&path), &MIGRATIONS[..1]).unwrap();
+            old.execute_batch(
+                "INSERT INTO conversations (id, address, created_at) VALUES (1, '+12025550100', 1);
+                INSERT INTO messages (conversation_id, direction, body, at, state)
+                    VALUES (1, 'in', 'hello there', 2, 'received');",
+            )
+            .unwrap();
+        }
+        let store = MessageStore::open(&path).unwrap();
+        let copy = dir.path().join("messages.db.schema1");
+        assert!(copy.exists());
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(copy.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+        let count = |c: &Connection| -> i64 {
+            c.query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(count(&store.conn), 1);
+        drop(store);
+
+        MessageStore::downgrade(&path, 1).unwrap();
+        let back = open(Some(&path), &MIGRATIONS[..1]).unwrap();
+        let v: i64 = back
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 1);
+        assert_eq!(count(&back), 1);
+        let left: i64 = back
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name IN
+                 ('mms_forgotten', 'files_forgotten', 'messages_mms_ad', 'parts_ad')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
+        let found: i64 = back
+            .query_row(
+                "SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'hello'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(found, 1);
+        drop(back);
+
+        let again = MessageStore::open(&path).unwrap();
+        assert_eq!(count(&again.conn), 1);
+        assert!(MessageStore::downgrade(&path, 0).is_err());
+    }
 
     fn incoming<'a>(addr: &'a str, body: &'a str, at: i64) -> NewIncoming<'a> {
         NewIncoming {
@@ -867,5 +1225,155 @@ mod tests {
             MessageState::Failed
         );
         assert!(b.search("two", 5).unwrap().len() == 1);
+    }
+
+    fn mms<'a>(conversation: i64, body: &'a str, path: &'a str) -> NewMms<'a> {
+        NewMms {
+            conversation,
+            direction: Direction::In,
+            sender: "+12025550161",
+            body,
+            at: 5,
+            sent_at: Some(4),
+            state: MessageState::Received,
+            mms_path: path,
+        }
+    }
+
+    fn part(file: &str) -> NewPart {
+        NewPart {
+            mime: "image/png".into(),
+            file: file.into(),
+            size: 3,
+        }
+    }
+
+    #[test]
+    fn group_conversations_sort_their_members() {
+        assert_eq!(
+            group_address(&["+12025550162", " +12025550161", "+12025550162", ""]),
+            "+12025550161,+12025550162"
+        );
+        let s = MessageStore::open_in_memory().unwrap();
+        let members = |a: &str, b: &str| {
+            vec![
+                (a.to_string(), format!("raw {a}")),
+                (b.to_string(), format!("raw {b}")),
+            ]
+        };
+        let c = s
+            .conversation_for_members(&members("+12025550162", "+12025550161"))
+            .unwrap();
+        let same = s
+            .conversation_for_members(&members("+12025550161", "+12025550162"))
+            .unwrap();
+        assert_eq!(c, same);
+        let conv = s.conversation(c).unwrap().unwrap();
+        assert_eq!(conv.address, "+12025550161,+12025550162");
+        // The raw numbers follow the sorted order.
+        assert_eq!(conv.numbers, vec!["raw +12025550161", "raw +12025550162"]);
+        assert!(s.conversation_for_members(&[]).is_err());
+    }
+
+    #[test]
+    fn mms_insert_dedupes_and_keeps_parts() {
+        let s = MessageStore::open_in_memory().unwrap();
+        let c = s
+            .conversation_for("+12025550161,+12025550162", &[])
+            .unwrap();
+        s.set_archived(c, true).unwrap();
+        let id = s
+            .insert_mms(
+                &mms(c, "look", "/org/ofono/mms/modemmanager/a1"),
+                &[part("parts/a1/cat.png"), part("parts/a1/dog.png")],
+            )
+            .unwrap()
+            .unwrap();
+        // The same mmsd-tng message again is a no-op.
+        assert!(s
+            .insert_mms(&mms(c, "look", "/org/ofono/mms/modemmanager/a1"), &[])
+            .unwrap()
+            .is_none());
+        let m = s.message(id).unwrap().unwrap();
+        assert_eq!(m.transport, "mms");
+        assert_eq!(m.sender, "+12025550161");
+        assert!(!m.read);
+        let conv = s.conversation(c).unwrap().unwrap();
+        assert!(!conv.archived && conv.unread == 1 && conv.last_at == 5);
+        let parts = s.parts(id).unwrap();
+        assert_eq!(
+            parts.iter().map(|p| p.file.as_str()).collect::<Vec<_>>(),
+            vec!["parts/a1/cat.png", "parts/a1/dog.png"]
+        );
+        assert!(parts[0].is_image());
+        assert_eq!(
+            parts[0].path(Path::new("/data")),
+            Path::new("/data/parts/a1/cat.png")
+        );
+        assert_eq!(
+            s.by_mms_path("/org/ofono/mms/modemmanager/a1")
+                .unwrap()
+                .unwrap()
+                .id,
+            id
+        );
+        assert!(s.search("look", 5).unwrap().len() == 1);
+    }
+
+    #[test]
+    fn deleting_mms_leaves_paths_and_files_to_clean_up() {
+        let s = MessageStore::open_in_memory().unwrap();
+        let c = s.conversation_for("+12025550163", &[]).unwrap();
+        s.insert_mms(
+            &mms(c, "", "/org/ofono/mms/modemmanager/b1"),
+            &[part("parts/b1/x.png")],
+        )
+        .unwrap()
+        .unwrap();
+        // Deleting the conversation cascades to messages and parts.
+        s.delete_conversation(c).unwrap();
+        assert_eq!(
+            s.forgotten_mms().unwrap(),
+            vec!["/org/ofono/mms/modemmanager/b1"]
+        );
+        assert_eq!(s.forgotten_files().unwrap(), vec!["parts/b1/x.png"]);
+        // A forgotten message is never imported again.
+        let c = s.conversation_for("+12025550163", &[]).unwrap();
+        assert!(s
+            .insert_mms(&mms(c, "", "/org/ofono/mms/modemmanager/b1"), &[])
+            .unwrap()
+            .is_none());
+        s.drop_forgotten_file("parts/b1/x.png").unwrap();
+        s.drop_forgotten_mms("/org/ofono/mms/modemmanager/b1")
+            .unwrap();
+        assert!(s.forgotten_files().unwrap().is_empty());
+        assert!(s.forgotten_mms().unwrap().is_empty());
+    }
+
+    #[test]
+    fn outgoing_mms_in_flight_is_not_failed_at_start() {
+        let s = MessageStore::open_in_memory().unwrap();
+        let c = s
+            .conversation_for("+12025550164,+12025550165", &[])
+            .unwrap();
+        let handed = s.insert_outgoing_mms(c, "to mmsd").unwrap();
+        s.add_parts(handed, &[part("parts/out-1/p.png")]).unwrap();
+        s.set_mms_path(handed, "/org/ofono/mms/modemmanager/c1")
+            .unwrap();
+        let queued = s.insert_outgoing_mms(c, "not yet").unwrap();
+        assert_eq!(s.message(handed).unwrap().unwrap().transport, "mms");
+        assert_eq!(s.parts(handed).unwrap().len(), 1);
+        assert_eq!(s.fail_interrupted().unwrap(), vec![queued]);
+        assert_eq!(
+            s.mms_in_flight().unwrap(),
+            vec![(handed, "/org/ofono/mms/modemmanager/c1".to_string())]
+        );
+        // A retry unlinks the old mmsd-tng object and remembers it.
+        s.forget_mms_path(handed).unwrap();
+        assert_eq!(s.mms_path(handed).unwrap(), None);
+        assert_eq!(
+            s.forgotten_mms().unwrap(),
+            vec!["/org/ofono/mms/modemmanager/c1"]
+        );
     }
 }
