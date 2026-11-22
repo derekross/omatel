@@ -338,6 +338,19 @@ async fn emergency_numbers_are_refused_and_never_reach_the_modem() {
     assert!(list.contains(&"911".to_string()) && list.contains(&"112".to_string()));
 }
 
+/// ModemManager settles EmergencyOnly a moment after the modem's State,
+/// so the agent follows the property itself: with no State change between,
+/// the modem state goes to emergency-only and back to ready.
+#[tokio::test]
+async fn emergency_only_followed_without_a_state_change() {
+    let r = rig().await;
+    r.modem.set_emergency_only(true).await.unwrap();
+    eventually(|| async { r.phone.modem_state().await.ok().as_deref() == Some("emergency-only") })
+        .await;
+    r.modem.set_emergency_only(false).await.unwrap();
+    eventually(|| async { r.phone.modem_state().await.ok().as_deref() == Some("ready") }).await;
+}
+
 #[tokio::test]
 async fn incoming_sms_stored_deleted_notified_and_replied() {
     let r = rig().await;
