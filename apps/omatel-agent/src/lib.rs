@@ -13,6 +13,8 @@
 //! - stores every incoming SMS (committed to disk, then deleted from the
 //!   modem; duplicates filtered), notifies per conversation with an inline
 //!   reply, sends messages and records delivery reports;
+//! - is mmsd-tng's client for MMS, group messages and attachments
+//!   ([`mms`]): stores what it receives, hands it what is sent;
 //! - serves `org.omamobile.Phone1` and `org.omamobile.Messages1` on the
 //!   session bus for the apps and the shell ([`omatel_api`]).
 //!
@@ -22,6 +24,7 @@
 mod audio;
 mod calls;
 mod iface;
+mod mms;
 mod sms;
 mod util;
 
@@ -67,6 +70,9 @@ pub struct Config {
     /// Omarchy's notification settings (`~/.local/state/omarchy/
     /// notifications.json`), whose `dnd` is Do Not Disturb.
     pub dnd_path: PathBuf,
+    /// Where mmsd-tng's user unit is installed, when it is: one of these
+    /// existing means this phone has an MMS service (`MmsAvailable`).
+    pub mms_units: Vec<PathBuf>,
 }
 
 impl Config {
@@ -81,6 +87,7 @@ impl Config {
                 .map(PathBuf::from)
                 .unwrap_or_default()
                 .join(".local/state/omarchy/notifications.json"),
+            mms_units: mms::unit_paths(),
         }
     }
 }
@@ -143,6 +150,17 @@ pub struct Agent {
     pub(crate) route: Mutex<String>,
     /// SMS objects being handled now (Added and List can both name one).
     pub(crate) handling: Mutex<HashSet<String>>,
+    /// The phone's own numbers (ModemManager's OwnNumbers), left out of
+    /// group conversations.
+    pub(crate) own_numbers: Mutex<Vec<String>>,
+    /// mmsd-tng, while it runs.
+    pub(crate) mms: Mutex<mms::MmsState>,
+    /// mmsd-tng is installed (its user unit, or an activatable bus name),
+    /// as last checked.
+    pub(crate) mms_installed: std::sync::atomic::AtomicBool,
+    /// Held while an MMS is handed to mmsd-tng, which announces the new
+    /// message before it answers: its handler waits for the answer.
+    pub(crate) mms_send: tokio::sync::Mutex<()>,
     /// The agent's runtime. zbus runs D-Bus method handlers on its own
     /// executor thread, where tokio isn't available: handlers hand their
     /// work to this runtime ([`Agent::on_runtime`]).
@@ -294,10 +312,16 @@ pub async fn start(
         muted: Mutex::new(false),
         route: Mutex::new("earpiece".into()),
         handling: Mutex::new(HashSet::new()),
+        own_numbers: Mutex::new(Vec::new()),
+        mms: Mutex::new(mms::MmsState::default()),
+        mms_installed: std::sync::atomic::AtomicBool::new(false),
+        mms_send: tokio::sync::Mutex::new(()),
         rt: tokio::runtime::Handle::current(),
     });
     iface::serve(&agent).await?;
     tokio::spawn(iface::notification_events(agent.clone()));
+    tokio::spawn(mms::watch(agent.clone()));
+    tokio::spawn(mms::sweep_files_now_and_then(agent.clone()));
     tracing::info!("serving org.omamobile.Phone1 and org.omamobile.Messages1");
     Ok(agent)
 }
@@ -378,6 +402,9 @@ async fn attach_when_present(agent: &Arc<Agent>) -> anyhow::Result<()> {
     });
     refresh_modem_state(agent, &modem_proxy, voice.as_ref()).await;
     refresh_emergency(agent, &modem_proxy).await;
+    if let Ok(own) = modem_proxy.own_numbers().await {
+        *agent.own_numbers.lock().unwrap() = own;
+    }
 
     let mut state_changes = modem_proxy.receive_state_changed().await;
     // ModemManager settles EmergencyOnly a moment after the state (after a

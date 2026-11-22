@@ -10,6 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+chrono.workspace = true
 serde_json.workspace = true
 omatel-api.workspace = true
 omatel-mm.workspace = true

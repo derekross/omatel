@@ -6,14 +6,16 @@
 use std::sync::Arc;
 
 use futures_util::StreamExt;
-use omatel_api::{CallInfo, MESSAGES_NAME, MESSAGES_PATH, PHONE_NAME, PHONE_PATH, ROUTES};
+use omatel_api::{
+    CallInfo, PartInfo, MESSAGES_NAME, MESSAGES_PATH, PHONE_NAME, PHONE_PATH, ROUTES,
+};
 use omatel_contacts::number;
 use omatel_notify::Event;
 use zbus::object_server::SignalEmitter;
 use zbus::{interface, DBusError};
 
 use crate::calls::{self, DialError};
-use crate::{audio, sms, Agent, Target};
+use crate::{audio, mms, sms, Agent, Target};
 
 #[derive(Debug, DBusError)]
 #[zbus(prefix = "org.omamobile.Phone1.Error")]
@@ -237,6 +239,70 @@ fn store_error(e: omatel_store::Error) -> zbus::fdo::Error {
     zbus::fdo::Error::Failed(format!("message store: {e}"))
 }
 
+/// Errors of the Messages1 members added with MMS: the standard ones
+/// (through `ZBus`) and MmsUnavailable.
+#[derive(Debug, DBusError)]
+#[zbus(prefix = "org.omamobile.Messages1.Error")]
+pub enum MessagesError {
+    #[zbus(error)]
+    ZBus(zbus::Error),
+    MmsUnavailable(String),
+}
+
+impl From<zbus::fdo::Error> for MessagesError {
+    fn from(e: zbus::fdo::Error) -> MessagesError {
+        MessagesError::ZBus(zbus::Error::FDO(Box::new(e)))
+    }
+}
+
+impl From<mms::SendError> for MessagesError {
+    fn from(e: mms::SendError) -> MessagesError {
+        match e {
+            mms::SendError::Store(e) => store_error(e).into(),
+            mms::SendError::Invalid(m) => zbus::fdo::Error::InvalidArgs(m).into(),
+        }
+    }
+}
+
+impl Messages {
+    /// Send to a conversation: SMS for text to one person, MMS for
+    /// anything with attachments or to a group.
+    async fn send_into(
+        &self,
+        conversation: i64,
+        text: &str,
+        attachments: Vec<(String, String)>,
+    ) -> Result<i64, MessagesError> {
+        let a = self.agent.clone();
+        let t = text.to_string();
+        let group = sms::is_group(&self.agent, conversation);
+        if (!attachments.is_empty() || group) && !mms::available(&self.agent) {
+            // Nothing is stored: on a phone with no MMS service it could
+            // never go.
+            return Err(MessagesError::MmsUnavailable(mms::NO_SERVICE.into()));
+        }
+        if attachments.is_empty() && !group {
+            return self
+                .agent
+                .on_runtime(async move { sms::send(&a, conversation, &t).await })
+                .await
+                .map_err(|e| store_error(e).into());
+        }
+        let id = self
+            .agent
+            .on_runtime(async move { mms::send(&a, conversation, &t, &attachments).await })
+            .await?;
+        if !mms::ready(&self.agent) {
+            // Kept, as failed, for Retry once mmsd-tng runs.
+            return Err(MessagesError::MmsUnavailable(format!(
+                "{}; the message is kept as not sent",
+                mms::NOT_RUNNING
+            )));
+        }
+        Ok(id)
+    }
+}
+
 #[interface(name = "org.omamobile.Messages1")]
 impl Messages {
     async fn send(&self, number: &str, text: &str) -> zbus::fdo::Result<(i64, i64)> {
@@ -283,6 +349,83 @@ impl Messages {
             .on_runtime(async move { sms::send(&a, conversation, &t).await })
             .await
             .map_err(store_error)
+    }
+
+    async fn send_with_attachments(
+        &self,
+        recipients: Vec<String>,
+        text: &str,
+        attachments: Vec<(String, String)>,
+    ) -> Result<(i64, i64), MessagesError> {
+        if text.trim().is_empty() && attachments.is_empty() {
+            return Err(zbus::fdo::Error::InvalidArgs("Empty message".into()).into());
+        }
+        let region = self.agent.region();
+        let members: Vec<(String, String)> = recipients
+            .iter()
+            .map(|r| (number::normalize(r, &region), r.trim().to_string()))
+            .filter(|(n, _)| !n.is_empty())
+            .collect();
+        if members.is_empty() {
+            return Err(zbus::fdo::Error::InvalidArgs("Missing number".into()).into());
+        }
+        // Without an MMS service, no group conversation is made for a
+        // message that could never go.
+        if (!attachments.is_empty() || members.len() > 1) && !mms::available(&self.agent) {
+            return Err(MessagesError::MmsUnavailable(mms::NO_SERVICE.into()));
+        }
+        let conv = self
+            .agent
+            .messages
+            .lock()
+            .unwrap()
+            .conversation_for_members(&members)
+            .map_err(store_error)?;
+        let id = self.send_into(conv, text, attachments).await?;
+        Ok((conv, id))
+    }
+
+    async fn send_to_conversation_with_attachments(
+        &self,
+        conversation: i64,
+        text: &str,
+        attachments: Vec<(String, String)>,
+    ) -> Result<i64, MessagesError> {
+        if text.trim().is_empty() && attachments.is_empty() {
+            return Err(zbus::fdo::Error::InvalidArgs("Empty message".into()).into());
+        }
+        let exists = self
+            .agent
+            .messages
+            .lock()
+            .unwrap()
+            .conversation(conversation)
+            .map_err(store_error)?
+            .is_some();
+        if !exists {
+            return Err(zbus::fdo::Error::InvalidArgs("No such conversation".into()).into());
+        }
+        self.send_into(conversation, text, attachments).await
+    }
+
+    fn list_parts(&self, message: i64) -> zbus::fdo::Result<Vec<PartInfo>> {
+        let parts = self
+            .agent
+            .messages
+            .lock()
+            .unwrap()
+            .parts(message)
+            .map_err(store_error)?;
+        Ok(parts
+            .into_iter()
+            .map(|p| PartInfo {
+                path: mms::part_path(&self.agent, &p.file)
+                    .to_string_lossy()
+                    .into_owned(),
+                mime: p.mime,
+                size: p.size,
+            })
+            .collect())
     }
 
     async fn retry(&self, message: i64) -> zbus::fdo::Result<()> {
@@ -335,6 +478,19 @@ impl Messages {
     #[zbus(property)]
     fn modem_state(&self) -> String {
         self.agent.modem_state.lock().unwrap().clone()
+    }
+
+    /// mmsd-tng runs: MMS can be handed to it.
+    #[zbus(property)]
+    fn mms_ready(&self) -> bool {
+        mms::ready(&self.agent)
+    }
+
+    /// This phone has an MMS service (mmsd-tng runs or is installed), so
+    /// Messages offers attachments, groups and the MMS settings.
+    #[zbus(property)]
+    fn mms_available(&self) -> bool {
+        mms::available(&self.agent)
     }
 
     #[zbus(signal)]
@@ -429,6 +585,19 @@ pub async fn modem_state_changed(agent: &Agent) {
         let m = i.get().await;
         let _ = m.modem_state_changed(i.signal_emitter()).await;
         let _ = m.ready_changed(i.signal_emitter()).await;
+    }
+}
+
+pub async fn mms_ready_changed(agent: &Agent) {
+    if let Ok(i) = agent
+        .session
+        .object_server()
+        .interface::<_, Messages>(MESSAGES_PATH)
+        .await
+    {
+        let m = i.get().await;
+        let _ = m.mms_ready_changed(i.signal_emitter()).await;
+        let _ = m.mms_available_changed(i.signal_emitter()).await;
     }
 }
 

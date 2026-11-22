@@ -137,13 +137,53 @@ otherwise a Reply button that opens Messages.
   shade and the lock screen show on the card.
 
 **Sending.** The message is written as `sending`, then sent in the
-background: `Messaging.Create`, then `Sms.Send`.
+background: `Messaging.Create`, then `Sms.Send`. Text to one person goes
+as SMS; anything with an attachment, and anything to a group, as MMS
+(below).
 - Delivery reports are requested by default, and the message object
   stays on the modem while the report is awaited, for 48 hours at most.
 - A failure marks the message `failed`. Retry sends it again in its
   place in the thread.
 - A send interrupted by the agent stopping is marked failed at the next
   start.
+
+## MMS
+
+mmsd-tng (`org.ofono.mms` on the session bus, a user service) does the
+network side: it takes the WAP push from ModemManager, fetches the message
+from the MMSC over the mobile data bearer, and posts what is sent. The
+agent follows it as it comes and goes (`MmsReady` on Messages1) and is its
+client (`apps/omatel-agent/src/mms.rs`):
+- **Receiving.** When mmsd-tng appears, `GetMessages` is read once; after
+  that `MessageAdded`. A received message is stored like an SMS: the text
+  from its text/plain parts, every other part copied out of mmsd-tng's PDU
+  file (each attachment is an offset and a length in it) into
+  `parts/<uuid>/` in the data directory. Then it is deleted from mmsd-tng.
+  The store keys MMS by mmsd-tng's object path (unique), so a crash in
+  between, or a message reported twice, stores nothing twice.
+- **Groups.** A conversation is everyone on the message, the sender and
+  the recipients, except the phone's own numbers (mmsd-tng's `Modem
+  Number`, ModemManager's `OwnNumbers`). Its address is the members'
+  numbers sorted and comma-joined; each message records its sender.
+- **Sending.** `SendWithAttachments` and `SendToConversationWithAttachments`
+  copy the attachment files into `parts/out-<id>/` before they return,
+  then hand text and files to `SendMessage` (mmsd-tng builds the SMIL). The
+  message follows mmsd-tng's status: `sent`, `sending_failed`,
+  `delivered`. It stays in mmsd-tng while a delivery report is awaited
+  (48 hours at most) and is deleted there after. The carrier's size limit
+  (`TotalMaxAttachmentSize`) is checked first, so a message that is too
+  big says so.
+- **mmsd-tng not running.** The message is kept as failed with the reason
+  ("The MMS service (mmsd-tng) isn't running"); Retry sends it once
+  mmsd-tng runs. The With Attachments calls also answer
+  `org.omamobile.Messages1.Error.MmsUnavailable`.
+- **Deleting.** The apps delete straight in the store. Triggers list the
+  deleted messages' mmsd-tng paths and attachment files
+  (`mms_forgotten`, `files_forgotten`), and the agent deletes those from
+  mmsd-tng and from disk when it attaches and every ten minutes. A
+  forgotten path is never imported again.
+- Read state isn't mirrored to mmsd-tng: a received message no longer
+  exists there once it is stored.
 
 ## Privacy
 
@@ -155,9 +195,9 @@ background: `Messaging.Create`, then `Sms.Send`.
 
 ## Not yet
 
-- **MMS (T3):** mmsd-tng, attachments and group threads. The schema has
-  the `parts` table and the `transport` column, and the UI shows the
-  attach button disabled.
+- **MMS on a phone (T3):** the client side above is tested against a
+  scripted mmsd-tng only. The data bearer, the carrier's MMSC settings and
+  mmsd-tng's user unit are the phone's part.
 - **Call audio (T4):** callaudiod, earpiece and speaker routing, and
   Bluetooth.
 - **The lock-screen call card and inline reply in Omarchy's

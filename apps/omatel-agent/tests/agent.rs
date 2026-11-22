@@ -77,6 +77,7 @@ async fn rig_with(locked: bool, inline_reply: bool) -> Rig {
         launcher: Launcher::Record(launches.clone()),
         lock_probe: LockProbe::Fixed(locked),
         dnd_path: dir.path().join("omarchy/notifications.json"),
+        mms_units: Vec::new(),
     };
     let sys = system.connect().await.unwrap();
     let ses = session.connect().await.unwrap();
@@ -584,6 +585,7 @@ async fn modem_appearing_later_and_open_conversation() {
         launcher: Launcher::Record(launches.clone()),
         lock_probe: LockProbe::Fixed(false),
         dnd_path: dir.path().join("omarchy/notifications.json"),
+        mms_units: Vec::new(),
     };
     let (sys, ses) = (
         system.connect().await.unwrap(),

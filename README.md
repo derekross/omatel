@@ -21,7 +21,7 @@ apps depend on them as git dependencies pinned to a release tag:
 | `omatel-notify` | desktop notifications with buttons and inline reply |
 | `omatel-theme` | the Omarchy theme for GTK 4 and libadwaita, and the apps' shared stylesheet |
 | `omatel-api` | the agent's session-bus API (`org.omamobile.Phone1`, `org.omamobile.Messages1`) and the shared settings |
-| `omatel-mock` | test doubles: a scripted ModemManager, a notification server, fictional demo data (never shipped) |
+| `omatel-mock` | test doubles: a scripted ModemManager and mmsd-tng, a notification server, fictional demo data (never shipped) |
 
 **omatel-agent** runs from login, whether or not an app is open:
 - It talks to the modem through ModemManager's D-Bus API. On Omarchy Mobile
@@ -35,13 +35,16 @@ apps depend on them as git dependencies pinned to a release tag:
   one notification per conversation with an inline reply, sends messages
   and records delivery reports. While the phone is locked, notifications
   say only "New message" unless you allow more in Messages' settings.
+- It is mmsd-tng's client for MMS: pictures and other attachments, and
+  group conversations, in and out. mmsd-tng (a user service on the session
+  bus) does the network side; the agent stores what it receives, with the
+  attachments copied into its data directory, and hands it what you send.
 
 > **Emergency calls (911, 112) don't work on this phone yet. Keep another
 > phone for emergencies.** The agent refuses emergency numbers, and Phone
 > shows a full-screen message instead of placing the call.
 
 Not yet:
-- MMS and group messages (they arrive with mmsd-tng).
 - Call audio routing: speaker and mute go to callaudiod once Omarchy
   Mobile's call audio work lands.
 - Hold, swap and conference calls; visual voicemail.

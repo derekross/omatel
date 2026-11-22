@@ -12,7 +12,7 @@ use omatel_notify::{Notification, DEFAULT_ACTION, MESSAGES};
 use omatel_store::{Direction, MessageState, NewIncoming};
 use zbus::zvariant::OwnedObjectPath;
 
-use crate::{iface, Agent, Target};
+use crate::{iface, mms, Agent, Target};
 
 /// How long a sent message's delivery report is awaited.
 const DELIVERY_WAIT: Duration = Duration::from_secs(48 * 3600);
@@ -131,26 +131,41 @@ pub async fn notify(agent: &Arc<Agent>, conversation: i64) {
         }
         return;
     }
-    let raw = conv
-        .numbers
-        .first()
-        .cloned()
-        .unwrap_or(conv.address.clone());
-    let blocked = agent
-        .blocked
-        .lock()
-        .unwrap()
-        .is_blocked(&raw, &agent.region())
-        .unwrap_or(false);
+    let numbers = if conv.numbers.is_empty() {
+        vec![conv.address.clone()]
+    } else {
+        conv.numbers.clone()
+    };
+    let region = agent.region();
+    // A group with anyone blocked is hidden in Messages: silent here too.
+    let blocked = numbers.iter().any(|n| {
+        agent
+            .blocked
+            .lock()
+            .unwrap()
+            .is_blocked(n, &region)
+            .unwrap_or(false)
+    });
     if !settings.message_notifications || conv.muted || blocked {
         return;
     }
-    let name = agent.name_for(&raw);
-    let who = if name.is_empty() {
-        agent.display_number(&raw)
+    let group = numbers.len() > 1;
+    let who = if !conv.title.is_empty() {
+        conv.title.clone()
     } else {
-        name
+        numbers
+            .iter()
+            .map(|n| display_name(agent, n))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
+    let lines: Vec<String> = unread
+        .iter()
+        .rev()
+        .take(3)
+        .rev()
+        .map(|m| line(agent, m, group))
+        .collect();
     let private = !settings.lockscreen_details && agent.is_locked().await;
     let mut n = if private {
         Notification::new(MESSAGES, "New message", "")
@@ -160,13 +175,6 @@ pub async fn notify(agent: &Arc<Agent>, conversation: i64) {
         } else {
             who
         };
-        let lines: Vec<&str> = unread
-            .iter()
-            .rev()
-            .take(3)
-            .rev()
-            .map(|m| m.body.as_str())
-            .collect();
         Notification::new(MESSAGES, summary, lines.join("\n"))
     };
     n = n.action(DEFAULT_ACTION, "Open");
@@ -191,6 +199,44 @@ pub async fn notify(agent: &Arc<Agent>, conversation: i64) {
             notes.by_id.insert(id, Target::Conversation(conversation));
         }
         Err(e) => tracing::warn!(error = %e, "no message notification"),
+    }
+}
+
+/// A contact's name, or the number as people read it.
+fn display_name(agent: &Agent, raw: &str) -> String {
+    let name = agent.name_for(raw);
+    if name.is_empty() {
+        agent.display_number(raw)
+    } else {
+        name
+    }
+}
+
+/// One message in a notification: its text, or what it carries when it
+/// has none ("Picture"); in a group, after who sent it.
+fn line(agent: &Agent, m: &omatel_store::Message, group: bool) -> String {
+    let text = if m.body.trim().is_empty() && m.transport == "mms" {
+        let parts = agent
+            .messages
+            .lock()
+            .unwrap()
+            .parts(m.id)
+            .unwrap_or_default();
+        mms::describe_parts(&parts).to_string()
+    } else {
+        m.body.clone()
+    };
+    if group && !m.sender.is_empty() {
+        let name = agent.name_for(&m.sender);
+        let from = if name.is_empty() {
+            agent.display_number(&m.sender)
+        } else {
+            // First names keep a group's lines short.
+            name.split_whitespace().next().unwrap_or(&name).to_string()
+        };
+        format!("{from}: {text}")
+    } else {
+        text
     }
 }
 
@@ -225,8 +271,22 @@ pub async fn mark_read(agent: &Arc<Agent>, conversation: i64) {
     }
 }
 
-/// Queue a text to a conversation; it is sent in the background.
+/// Queue a text to a conversation; it is sent in the background. A
+/// group conversation's text goes as MMS (SMS has no groups).
 pub async fn send(agent: &Arc<Agent>, conversation: i64, text: &str) -> omatel_store::Result<i64> {
+    if is_group(agent, conversation) {
+        if !mms::available(agent) {
+            // A group's text can only go as MMS; with no MMS service on
+            // the phone nothing is stored that could never go.
+            return Err(omatel_store::Error::Format(mms::NO_SERVICE.into()));
+        }
+        return mms::send(agent, conversation, text, &[])
+            .await
+            .map_err(|e| match e {
+                mms::SendError::Store(e) => e,
+                mms::SendError::Invalid(m) => omatel_store::Error::Format(m),
+            });
+    }
     let id = agent
         .messages
         .lock()
@@ -237,12 +297,28 @@ pub async fn send(agent: &Arc<Agent>, conversation: i64, text: &str) -> omatel_s
     Ok(id)
 }
 
+/// Whether a conversation has several members (a group: MMS only).
+pub fn is_group(agent: &Agent, conversation: i64) -> bool {
+    agent
+        .messages
+        .lock()
+        .unwrap()
+        .conversation(conversation)
+        .ok()
+        .flatten()
+        .is_some_and(|c| c.numbers.len() > 1)
+}
+
 /// Send a failed message again, in its place in the thread.
 pub async fn retry(agent: &Arc<Agent>, id: i64) -> bool {
     let msg = agent.messages.lock().unwrap().message(id).ok().flatten();
     let Some(m) = msg else { return false };
     if m.direction != Direction::Out || m.state != MessageState::Failed {
         return false;
+    }
+    if m.transport == "mms" {
+        mms::retry(agent, id, m.conversation_id).await;
+        return true;
     }
     let _ = agent
         .messages
