@@ -57,7 +57,7 @@ bin/cross package     # pkgbuild/omatel-agent-<version>-1-aarch64.pkg.tar.zst
   - a modem that appears late.
 - **`scripts/chain-test.sh`** runs the agent over the real stack in a
   container: the agent, then `omamobile-mmd` and `omamobile-sitd` from an
-  Omarchy Mobile checkout (`OMARCHY_MOBILE`, default
+  Omamobile checkout (`OMARCHY_MOBILE`, default
   `~/Projects/omarchy-mobile`), with `tools/sit-sim` as the modem. It also
   checks that the agent's log holds no number and no text.
 
@@ -102,5 +102,5 @@ object paths only.
   data, and the agent reports `no-modem`.
 - Never test emergency numbers. The agent refuses them anyway.
 - Calls and SMS on a real SIM transmit and cost money, so the human runs
-  them, following the runbook in Omarchy Mobile's
+  them, following the runbook in Omamobile's
   `docs/TELEPHONY-APPS-PLAN.md`.

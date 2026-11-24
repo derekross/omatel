@@ -3,8 +3,8 @@
 //! (the owner's answer to Q12 of the telephony plan). It runs as a systemd
 //! user unit from login and:
 //!
-//! - watches ModemManager on the system bus (the real one, or Omarchy
-//!   Mobile's `omamobile-mmd` bridge) and follows the modem as it comes
+//! - watches ModemManager on the system bus (the real one, or Omamobile's
+//!   `omamobile-mmd` bridge) and follows the modem as it comes
 //!   and goes;
 //! - signals incoming calls, rings (through feedbackd when it runs), raises
 //!   the incoming-call notification and opens Phone's answer page;

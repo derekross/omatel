@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # The agent over the real chain: omatel-agent -> omamobile-mmd ->
-# omamobile-sitd -> tools/sit-sim, from an Omarchy Mobile checkout
+# omamobile-sitd -> tools/sit-sim, from an Omamobile checkout
 # (OMARCHY_MOBILE, default ~/Projects/omarchy-mobile), in a container with
 # Python, PyGObject and dbus (the bridge's conformance image), on private
 # buses. Never the machine's own buses, never a phone.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 repo=${OMARCHY_MOBILE:-$HOME/Projects/omarchy-mobile}
-[[ -x $repo/tools/sit-sim ]] || { echo "no Omarchy Mobile checkout at $repo" >&2; exit 1; }
+[[ -x $repo/tools/sit-sim ]] || { echo "no Omamobile checkout at $repo" >&2; exit 1; }
 image=omatel-chain:1
 if ! docker image inspect "$image" >/dev/null 2>&1; then
   docker build -t "$image" - <<'DOCKERFILE'

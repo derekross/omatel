@@ -1,6 +1,6 @@
 # omatel
 
-The shared telephony core of Omarchy Mobile's Phone and Messages apps (the
+The shared telephony core of Omamobile's Phone and Messages apps (the
 crates in `crates/`) and `omatel-agent`, the background service both use.
 The apps live in their own repositories, `omaphone` and `omamessages`, and
 depend on these crates through git dependencies pinned to a release tag:

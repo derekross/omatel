@@ -1,6 +1,6 @@
 # omatel
 
-omatel is the shared telephony core of Omarchy Mobile, and the background
+omatel is the shared telephony core of Omamobile, and the background
 service behind its **Phone** and **Messages** apps. The apps live in their
 own repositories:
 
@@ -24,7 +24,7 @@ apps depend on them as git dependencies pinned to a release tag:
 | `omatel-mock` | test doubles: a scripted ModemManager, a notification server, fictional demo data (never shipped) |
 
 **omatel-agent** runs from login, whether or not an app is open:
-- It talks to the modem through ModemManager's D-Bus API. On Omarchy Mobile
+- It talks to the modem through ModemManager's D-Bus API. On Omamobile
   phones that API comes from `omamobile-mmd`, a bridge to the phone's own
   modem stack; elsewhere it comes from ModemManager itself.
 - It rings for incoming calls (through feedbackd), shows a notification
@@ -42,8 +42,8 @@ apps depend on them as git dependencies pinned to a release tag:
 
 Not yet:
 - MMS and group messages (they arrive with mmsd-tng).
-- Call audio routing: speaker and mute go to callaudiod once Omarchy
-  Mobile's call audio work lands.
+- Call audio routing: speaker and mute go to callaudiod once
+  Omamobile's call audio work lands.
 - Hold, swap and conference calls; visual voicemail.
 - CardDAV sync: the address book is a plain vCard folder that a sync tool
   can keep in step with a server.
@@ -51,7 +51,7 @@ Not yet:
 
 ## Install
 
-On Omarchy Mobile, install `omaphone` and `omamessages`; both bring in the
+On Omamobile, install `omaphone` and `omamessages`; both bring in the
 `omatel-agent` package. Then start the agent once:
 
 ```

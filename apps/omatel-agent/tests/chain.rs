@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The real chain, offline: omatel-agent -> omamobile-mmd (the
 //! ModemManager bridge) -> omamobile-sitd (the RIL) -> tools/sit-sim (a
-//! scripted modem), from an Omarchy Mobile checkout. Each runs on private
+//! scripted modem), from an Omamobile checkout. Each runs on private
 //! buses and sockets in a temporary directory.
 //!
-//! Skipped unless `OMATEL_CHAIN_REPO` names the omarchy-mobile checkout;
+//! Skipped unless `OMATEL_CHAIN_REPO` names the omamobile checkout;
 //! `scripts/chain-test.sh` runs it in a container that has Python,
 //! PyGObject and dbus. Every number is a fictional 555-01xx one.
 
@@ -99,7 +99,7 @@ fn transcript(path: &Path) -> Vec<serde_json::Value> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agent_over_the_real_bridge_and_ril() {
     let Some(repo) = std::env::var_os("OMATEL_CHAIN_REPO").map(PathBuf::from) else {
-        eprintln!("skipped: set OMATEL_CHAIN_REPO to an omarchy-mobile checkout");
+        eprintln!("skipped: set OMATEL_CHAIN_REPO to an omamobile checkout");
         return;
     };
     let logs = LogBuffer::default();
