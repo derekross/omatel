@@ -8,7 +8,7 @@ use clap::Parser;
 #[command(
     name = "omatel-agent",
     version,
-    about = "The background service of Omarchy Mobile's Phone and Messages"
+    about = "The background service of Omamobile's Phone and Messages"
 )]
 struct Cli {
     /// Never open the apps (no answer page, no conversation on a click).

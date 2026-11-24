@@ -16,7 +16,7 @@ use zbus::zvariant::OwnedObjectPath;
 use crate::util::now_ms;
 use crate::{audio, iface, Agent, Target, Tracked};
 
-/// The name Omarchy Mobile's shell call card owns while it runs
+/// The name Omamobile's shell call card owns while it runs
 /// (omamobile-shell's omamobile-call-watch).
 const CALL_CARD: &str = "org.omamobile.CallCard";
 
@@ -165,7 +165,7 @@ async fn ringing(agent: &Arc<Agent>, key: &str) {
     if silenced {
         iface::silenced_calls_changed(agent).await;
     }
-    // Omarchy Mobile's shell shows ringing calls itself (its call card owns
+    // Omamobile's shell shows ringing calls itself (its call card owns
     // this name): no toast and no answer page of ours on top of it. A
     // silenced call keeps its quiet notification, which the card doesn't
     // replace.

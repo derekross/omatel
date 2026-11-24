@@ -14,7 +14,7 @@ use the crates as git dependencies pinned to an omatel release tag.
                 omatel-agent ── org.freedesktop.Notifications (inline reply)
                        │      ── feedbackd (ring), callaudiod (route, mute)
                        │ system bus: org.freedesktop.ModemManager1
-        omamobile-mmd (Omarchy Mobile)  or  ModemManager (elsewhere)
+        omamobile-mmd (Omamobile)  or  ModemManager (elsewhere)
                        │
                 omamobile-sitd ── the modem
 ```

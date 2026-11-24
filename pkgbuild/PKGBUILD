@@ -2,7 +2,7 @@
 #
 # Builds omatel-agent from this checkout. Phone (omaphone) and Messages
 # (omamessages) live in their own repositories and depend on this package.
-# Omarchy Mobile's packages/omatel builds a pinned release the same way.
+# Omamobile's packages/omatel builds a pinned release the same way.
 pkgname=omatel-agent
 pkgver=$(sed -n 's/^version = "\(.*\)"/\1/p' "$startdir/../Cargo.toml" | head -1)
 pkgrel=1
@@ -15,7 +15,7 @@ makedepends=('cargo' 'pkgconf' 'sqlite')
 depends=('gcc-libs' 'glibc' 'sqlite' 'dbus' 'systemd')
 optdepends=('omaphone: the Phone app'
             'omamessages: the Messages app'
-            'omamobile-mmd: the modem on Omarchy Mobile phones'
+            'omamobile-mmd: the modem on Omamobile phones'
             'modemmanager: the modem on other machines'
             'feedbackd: ring and vibrate for incoming calls'
             'callaudiod: call audio routing (speaker, mute)')

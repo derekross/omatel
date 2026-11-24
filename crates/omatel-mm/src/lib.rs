@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! ModemManager 1.24's D-Bus API, the part phone software uses, as zbus 5
 //! proxies, with the enum values and a few typed helpers. It works the
-//! same against the real ModemManager and against Omarchy Mobile's bridge
+//! same against the real ModemManager and against Omamobile's bridge
 //! (`omamobile-mmd`), which serves the same names on the system bus.
 //!
 //! Member names and signatures follow MM 1.24's `introspection/*.xml`;
